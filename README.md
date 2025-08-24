@@ -1,5 +1,7 @@
 # host-mdx
 
+[![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx )
+
 This creates and serves a [github pages](https://docs.github.com/en/pages) style html directory from a corresponding mdx directory
 
 ## Usage
