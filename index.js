@@ -1,32 +1,74 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
-import http from 'node:http'
-import process from "node:process"
-import { pathToFileURL } from "node:url"
-import { minify } from 'html-minifier-terser'
-import * as runtime from 'react/jsx-runtime'
-import { createElement } from 'react'
-import { renderToString } from 'react-dom/server'
-import { evaluate } from '@mdx-js/mdx'
-import rehypeHighlight from "rehype-highlight";
-import { common } from 'lowlight'
-import gdscript from "@exercism/highlightjs-gdscript"
-import * as readline from 'node:readline';
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import http from 'http'
+import ignore from "ignore";
+import chokidar from 'chokidar';
+import * as readline from 'readline';
+import { mdxToHtml } from './mdx-to-html.js'
 
 
-// Constants
-const DEFAULT_PORT = 3000
+// To-Set Properties
 const APP_NAME = "host-mdx"
+const DEFAULT_PORT = 3000
+const IGNORE_FILE_NAME = ".hostmdxignore"
+const CONFIG_FILE_NAME = "host-mdx.js"
+const DEFAULT_IGNORES = `
+${IGNORE_FILE_NAME}
+${CONFIG_FILE_NAME}
+node_modules
+package-lock.json
+package.json
+.git
+`
+
+
+// Flags
+const CREATE_FLAG = "--create-only"
+const CREATE_SHORT_FLAG = "-c"
+const HELP_FLAG = "--help"
+const HELP_SHORT_FLAG = "-h"
+const INPUT_PATH_FLAG = "--input-path"
+const OUTPUT_PATH_FLAG = "--output-path"
+const PORT_FLAG = "--port"
+const VERBOSE_FLAG = "--verobse"
+const VERBOSE_SHORT_FLAG = "-v"
+const TRACK_CHANGES_FLAG = "--track-changes"
+const TRACK_CHANGES_SHORT_FLAG = "-t"
+
+
+// Messages & Errors
+const HELP_MESSAGE = `Usage: host-mdx [options]
+
+Options:
+${CREATE_FLAG}, ${CREATE_SHORT_FLAG}     Only create the html website from mdx does not host
+${HELP_FLAG}, ${HELP_SHORT_FLAG}            Shows all available options
+${INPUT_PATH_FLAG}=...      The path at which all mdx files are stored
+${OUTPUT_PATH_FLAG}=...     The path to which all html files will be generated
+${PORT_FLAG}=...            Localhost port number on which to host 
+${TRACK_CHANGES_FLAG}, ${TRACK_CHANGES_SHORT_FLAG}   Tracks any changes made & auto reloads
+${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}         Shows additional log messages
+`
+
+
+// Private Properties
+let isCreatingSite = false  // Prevents site from being recreated if creation is already ongoing
+let isVerbose = false
+let configs
+let server
 const TEMP_HTML_DIR = path.join(os.tmpdir(), `${APP_NAME}`)
-const HELP_MESSAGE = `deno ${APP_NAME} [mdx-path] [<optional-port-number>] [<optional-html-dir>]`
-const STARTED_CREATING_SITE = `==== Started creating site ==== `
-const FINISHED_CREATING_SITE = `==== Finished creating site ==== `
-const INVALID_MDX_DIR_ERROR = `Invalid mdx directory (1st argument) provided!`
-const INVALID_PORT_NUMBER_ERROR = `Invalid port number (2nd argument) provided!`
-const INVALID_HTML_DIR_ERROR = `Invalid html directory (3rd argument) could not create/find!`
+const TIME_OPTIONS = {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+    fractionalSecondDigits: 3
+}
 const MIME_TYPE = {  // Maps extensions to mime protocol
     '.html': 'text/html',
     '.css': 'text/css',
@@ -43,117 +85,222 @@ const MIME_TYPE = {  // Maps extensions to mime protocol
     '.pdf': 'application/pdf',
     '.zip': 'application/zip',
 }
-let is_creating_site = false  // Prevents site from being recreated if creation is ongoing
 
 
-// Functions
-async function mdx_to_html(mdx_code, base_url) {  // converts mdx code into html code, `base_url` is the path from where all the mdx import path relatively work from
+// Utility Methods
+function log(msg, checkVerbose = false) {
+    if (checkVerbose && !isVerbose) {
+        return
+    }
 
-    const jsx = (await evaluate(mdx_code, {
-        ...runtime,
-        rehypePlugins: [[rehypeHighlight, { languages: { ...common, gdscript } }]],
-        baseUrl: base_url
-    })).default
-    const html_code = renderToString(createElement(jsx))
-
-    return minify(html_code, { minifyCSS: true })
-
+    let timestamp = new Date().toLocaleString(undefined, TIME_OPTIONS)
+    console.log(`[${APP_NAME} ${timestamp}] ${msg}`)
 }
-async function create_site(create_from_path, create_at_path) {
+function createTempDir() {
+
+    // Delete existing temp dir
+    if (fs.existsSync(TEMP_HTML_DIR)) {
+        fs.rmSync(TEMP_HTML_DIR, { recursive: true, force: true })
+    }
+
+
+    // Create default temp html dir
+    fs.mkdirSync(TEMP_HTML_DIR, { recursive: true })
+
+
+    return fs.mkdtempSync(path.join(TEMP_HTML_DIR, `/html-`));
+}
+function getIgnore(ignoreFilePath) {
+    const ig = ignore();
+    let ignoreContent = DEFAULT_IGNORES
+
+    if (fs.existsSync(ignoreFilePath)) {
+        ignoreContent += `\n${fs.readFileSync(ignoreFilePath, "utf8")}`
+    }
+
+    ig.add(ignoreContent);
+
+    return ig
+}
+function createFile(filePath, fileContent = "") {
+
+    // Check if path for file exists
+    let fileLocation = path.dirname(filePath)
+    if (!fs.existsSync(fileLocation)) {
+        fs.mkdirSync(fileLocation, { recursive: true });
+    }
+
+
+    // Create file
+    fs.writeFileSync(filePath, fileContent);
+}
+async function createSite(inputPath, outputPath) {
     // Exit if already creating
-    if (is_creating_site) {
+    if (isCreatingSite) {
+        log("site creation already ongoing!")
         return
     }
 
 
     // Set creating status to ongoing
-    is_creating_site = true
-    console.log(STARTED_CREATING_SITE)
+    isCreatingSite = true
+
+
+    // Get config properties
+    let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`)
+    if (fs.existsSync(configFilePath)) {
+        configs = await import(configFilePath);
+    }
+
+
+    // Broadcast site creation started
+    log("Creating site...")
+    configs?.onSiteCreateStart?.(inputPath, outputPath)
 
 
     // Remove html folder if it already exists
-    if (fs.existsSync(create_at_path)) {
-        fs.rmSync(create_at_path, { recursive: true, force: true });
+    if (fs.existsSync(outputPath)) {
+        fs.rmSync(outputPath, { recursive: true, force: true });
     }
 
 
-    // copy paste directory
-    fs.cpSync(create_from_path, create_at_path, { recursive: true });
+    // Setup ignore
+    let ignoreFilePath = path.join(inputPath, IGNORE_FILE_NAME)
+    let ig = getIgnore(ignoreFilePath)
 
 
-    // Iterate through files
-    let files = fs.readdirSync(create_from_path, { withFileTypes: true, recursive: true });
-
-    for (const file of files) {
-        const file_path = path.join(file.parentPath, file.name)
-
-        if (file.isFile() && file_path.endsWith(".mdx")) {
-
-            // To ensure file paths work
-            process.chdir(file.parentPath);
-
-            let base_url = pathToFileURL(path.normalize(path.join(create_from_path, path.sep))).href  // Converts file into file uri i.e "file:///my/path/"
-            let mdx_code = fs.readFileSync(file_path, 'utf8');
-            let html_code = await mdx_to_html(mdx_code, base_url);
-            let html_file_path = file_path.replace(create_from_path, create_at_path).replace(".mdx", ".html")
-            let html_dir_path = path.dirname(html_file_path)
+    // Iterate through all folders & files
+    const stack = [inputPath];
+    while (stack.length > 0) {
+        const currentPath = stack.pop()
+        const relToInput = path.relative(inputPath, currentPath)
+        const toIgnore = inputPath != currentPath && ig.ignores(relToInput)
+        const absToOutput = path.join(outputPath, relToInput)
+        const isDir = fs.statSync(currentPath).isDirectory()
+        const isMdx = !isDir && absToOutput.endsWith(".mdx")
 
 
-            // Make directory if it doesn't exist
-            if (!fs.existsSync(html_dir_path)) {
-                fs.mkdirSync(html_dir_path, { recursive: true })
-            }
-
-
-            // write to file
-            fs.writeFileSync(html_file_path, html_code);
+        // Skip if to ignore this path
+        if (toIgnore) {
+            continue
         }
 
+
+        // Make dir
+        if (isDir) {
+            log(`${currentPath} ---> ${absToOutput}`, true)
+            configs?.onFileCreateStart?.(currentPath, absToOutput)
+            fs.mkdirSync(absToOutput, { recursive: true });
+            configs?.onFileCreateEnd?.(currentPath, absToOutput)
+        }
+        // Make html file from mdx
+        else if (!isDir && isMdx) {
+
+            // Broadcast file creation started
+            let absHtmlPath = path.format({ ...path.parse(absToOutput), base: '', ext: '.html' })
+            log(`${currentPath} ---> ${absHtmlPath}`, true)
+            configs?.onFileCreateStart?.(currentPath, absHtmlPath)
+
+
+            // convert mdx code into html & paste into file
+            let mdxCode = fs.readFileSync(currentPath, 'utf8');
+            let parentDir = path.dirname(currentPath)
+            let htmlCode = await mdxToHtml(mdxCode, parentDir, configs?.modBundleMDXSettings);
+            createFile(absHtmlPath, `<!DOCTYPE html>\n${htmlCode}`);
+
+
+            // Broadcast file creation ended
+            configs?.onFileCreateEnd?.(currentPath, absHtmlPath)
+        }
+        // Copy paste file
+        else if (!isDir) {
+            log(`${currentPath} ---> ${absToOutput}`, true)
+            configs?.onFileCreateStart?.(currentPath, absToOutput)
+            fs.copyFileSync(currentPath, absToOutput)
+            configs?.onFileCreateEnd?.(currentPath, absToOutput)
+        }
+
+
+        // Skip if current path is a file or a directory to ignore
+        if (!isDir) {
+            continue
+        }
+
+
+        // Add to stack if current path is dir
+        const files = fs.readdirSync(currentPath);
+        for (const file of files) {
+            stack.push(path.join(currentPath, file));
+        }
     }
 
-    is_creating_site = false;
-    console.log(FINISHED_CREATING_SITE)
+
+    // Unset creating status & Notify
+    isCreatingSite = false;
+
+
+    // Broadcast site creation ended
+    log("Created site")
+    configs?.onSiteCreateEnd?.(inputPath, outputPath)
 }
-async function watch_for_reload(mdx_dir, html_dir) {  // Watches `mdx_dir` files for any code change
+
+
+// Main Methods
+async function createSiteSafe(...args) {
+    try {
+        await createSite(...args);
+    }
+    catch (err) {
+        isCreatingSite = false
+        console.log(err);
+        log("Failed to create site!");
+    }
+}
+async function listenForKey(createSiteCallback) {
 
     readline.emitKeypressEvents(process.stdin);
 
-    if (process.stdin.isTTY)
+    if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
+    }
 
     process.stdin.on('keypress', (chunk, key) => {
         if (key && key.name == 'r') {
-            create_site(mdx_dir, html_dir)
+            createSiteCallback();
         }
         else if (key && key.sequence == '\x03') {
-            process.exit();
+            server.close((e) => { process.exit() })
         }
     });
 }
-function start_server(html_dir, port) {  // Starts server at given port
+function startServer(htmlDir, port) {  // Starts server at given port
+
+    // Broadcast server starting
+    configs?.onHostStart?.(port)
+
 
     // Start Server
-    const server = http.createServer((req, res) => {
+    const newServer = http.createServer((req, res) => {
 
         // Parse & Sanitize URL
-        let parsed_url = new URL("http://" + req.headers.host + req.url)
-        let sanitized_url = path.normalize(parsed_url.pathname).replace(/^(\.\.[\/\\])+/, '')
-        let is_directory = !Boolean(path.parse(sanitized_url).ext)
-        let relative_file_path = path.normalize(sanitized_url + (is_directory ? "/index.html" : ""))
-        let absolute_file_path = path.join(path.resolve(html_dir), relative_file_path)
-        let path_exists = fs.existsSync(absolute_file_path)
+        let parsedUrl = new URL("http://" + req.headers.host + req.url)
+        let sanitizedUrl = path.normalize(parsedUrl.pathname).replace(/^(\.\.[\/\\])+/, '')
+        let isDirectory = !Boolean(path.parse(sanitizedUrl).ext)
+        let relativeFilePath = path.normalize(sanitizedUrl + (isDirectory ? "/index.html" : ""))
+        let absoluteFilePath = path.join(path.resolve(htmlDir), relativeFilePath)
+        let pathExists = fs.existsSync(absoluteFilePath)
 
         // Respondes with content of file
-        if (path_exists)
+        if (pathExists)
             // read file from file system
-            fs.readFile(absolute_file_path, function (err, data) {
+            fs.readFile(absoluteFilePath, function (err, data) {
                 if (err) {
                     res.statusCode = 500
                     res.end(`Error getting the file: ${err}.`)
                 }
                 else {
                     // Based on the URL path, extract the file extention. e.g. .js, .doc, ...
-                    const ext = path.parse(absolute_file_path).ext
+                    const ext = path.parse(absoluteFilePath).ext
                     res.setHeader('Content-type', MIME_TYPE[ext] || 'text/plain') // if the file is found, set Content-type and send data
                     res.end(data)
                 }
@@ -164,90 +311,97 @@ function start_server(html_dir, port) {  // Starts server at given port
             res.end(`404 Invalid url not found!`)
         }
     })
+    newServer.listen(port, () => { log(`Server listening at ${port} ... (Press 'r' to manually reload, Press 'Ctrl+c' to exit)`) })
+    newServer.on("close", () => { configs?.onHostEnd?.(port) });
 
-    server.listen(port, () => { console.log(`Server listening at ${port} ... (Press 'r' to reload, Press 'Ctrl+c' to exit)`) })
+    return newServer
 }
-async function main() {
-
+async function Main() {
     // Get all arguments
     const args = process.argv.slice(2)
 
 
     // Check if asked for help
-    if (args[0] === "--help" || args[0] === "-h") {
+    if (args.includes(HELP_FLAG) || args.includes(HELP_SHORT_FLAG)) {
         console.log(HELP_MESSAGE)
         return;
     }
 
 
-    // Check if valid mdx folder path
-    var mdx_path = args[0];
-    if (!fs.existsSync(mdx_path)) {
-        console.log(INVALID_MDX_DIR_ERROR)
+    // Assign to create
+    let toCreateOnly = args.includes(CREATE_FLAG) || args.includes(CREATE_SHORT_FLAG)
+
+    // Assign input path
+    let inputPath = args.find(val => val.startsWith(INPUT_PATH_FLAG))
+    inputPath = inputPath !== undefined ? inputPath.split('=')[1] : process.cwd()
+
+    // Assign output path
+    let outputPath = args.find(val => val.startsWith(OUTPUT_PATH_FLAG))
+    let outputPathProvided = outputPath !== undefined
+    outputPath = outputPathProvided ? outputPath.split('=')[1] : createTempDir()
+
+    // Assign tracking changes
+    let toTrackChanges = args.includes(TRACK_CHANGES_FLAG) || args.includes(TRACK_CHANGES_SHORT_FLAG)
+
+    // Assign port
+    let port = args.find(val => val.startsWith(PORT_FLAG))
+    port = port !== undefined ? Number(port.split('=')[1]) : DEFAULT_PORT
+
+    // Assign verbose
+    isVerbose = args.includes(VERBOSE_FLAG) || args.includes(VERBOSE_SHORT_FLAG)
+
+
+    // Check input path
+    if (!fs.existsSync(inputPath) || !fs.lstatSync(inputPath).isDirectory()) {
+        log(`Invalid input path "${inputPath}"`)
+        return
+    }
+
+    // Check output path
+    if (!fs.existsSync(outputPath) || !fs.lstatSync(outputPath).isDirectory()) {
+        log(`Invalid output path "${outputPath}"`)
+        return
+    }
+
+    // Check port
+    if (!Number.isInteger(port)) {
+        log(`Invalid port`)
         return
     }
 
 
-    // Check if valid port number
-    var port = args[1]
-    var port_number = DEFAULT_PORT
-    if (port != undefined) {
-        port_number = Number(port)
-
-        if (!Number.isInteger(port_number)) {
-            console.log(INVALID_PORT_NUMBER_ERROR)
-            return
-        }
+    // Create site from mdx & return if only needed to create site
+    await createSiteSafe(inputPath, outputPath)
+    if (toCreateOnly) {
+        return;
     }
 
 
-    // Check if valid html folder path
-    var html_path = args[2];
-    if (html_path !== undefined) {
+    // Watch for key presses
+    listenForKey(() => createSiteSafe(inputPath, outputPath))
 
-        // Create user given html dir if it does not exist
-        try {
-            if (!fs.existsSync(html_path)) {
-                fs.mkdirSync(html_path, { recursive: true })
-            }
-        }
-        catch {
-            console.log(INVALID_HTML_DIR_ERROR)
-            return;
-        }
-    }
-    else {
 
-        // Create default temp html dir
-        if (!fs.existsSync(TEMP_HTML_DIR)) {
-            fs.mkdirSync(TEMP_HTML_DIR, { recursive: true })
-        }
-
-        html_path = fs.mkdtempSync(path.join(TEMP_HTML_DIR, `/html-`));
+    // Watch for changes
+    if (toTrackChanges) {
+        chokidar.watch(inputPath, { ignoreInitial: true }).on('all', (event, path) => {
+            createSiteSafe(inputPath, outputPath)
+        });
     }
 
 
-    // Create site given html & mdx locations
-    var abs_mdx_path = path.resolve(mdx_path)
-    var abs_html_path = path.resolve(html_path)
-    create_site(abs_mdx_path, abs_html_path)
+    // Start server
+    server = startServer(outputPath, port)
 
 
-    // Start server and watch for changes if flag is passed
-    watch_for_reload(abs_mdx_path, abs_html_path)
-    start_server(abs_html_path, port_number)
-
-
-    // Remove temp html directory
-    process.on("SIGINT", () => {
-
+    // Handle quit
+    process.on("exit", () => {
         // Remove html path
-        if (fs.existsSync(abs_html_path)) {
-            fs.rmSync(abs_html_path, { recursive: true, force: true })
+        if (!outputPathProvided && fs.existsSync(outputPath)) {
+            fs.rmSync(outputPath, { recursive: true, force: true })
         }
 
         process.exit(0);
     });
 }
 
-await main();
+Main()
