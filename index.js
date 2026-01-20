@@ -172,7 +172,14 @@ async function createSite(inputPath, outputPath) {
     // Iterate through all folders & files
     const stack = [inputPath];
     while (stack.length > 0) {
+        // Continue if path does not exist
         const currentPath = stack.pop()
+        if(!fs.existsSync(currentPath)){
+            continue;
+        }
+
+        
+        // Get essentials
         const relToInput = path.relative(inputPath, currentPath)
         const toIgnore = inputPath != currentPath && ig.ignores(relToInput)
         const absToOutput = path.join(outputPath, relToInput)
@@ -274,7 +281,7 @@ async function listenForKey(createSiteCallback) {
     });
 }
 function startServer(htmlDir, port) {  // Starts server at given port
-
+    
     // Broadcast server starting
     configs?.onHostStart?.(port)
 
@@ -313,6 +320,8 @@ function startServer(htmlDir, port) {  // Starts server at given port
     })
     newServer.listen(port, () => { log(`Server listening at ${port} ... (Press 'r' to manually reload, Press 'Ctrl+c' to exit)`) })
     newServer.on("close", () => { configs?.onHostEnd?.(port) });
+    newServer.on("error", (e) => { log(`Error Starting server ${e.message}`); throw e; });
+
 
     return newServer
 }
@@ -383,7 +392,10 @@ async function Main() {
 
     // Watch for changes
     if (toTrackChanges) {
-        chokidar.watch(inputPath, { ignoreInitial: true }).on('all', (event, path) => {
+        chokidar.watch(inputPath, { 
+            ignoreInitial: true,
+            ignored: (path, stats) => isCreatingSite  // Ignore if site creation is ongoing
+        }).on('all', (event, path) => {
             createSiteSafe(inputPath, outputPath)
         });
     }
