@@ -3,18 +3,22 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import http from 'http'
+import polka from 'polka';
+import sirv from 'sirv';
 import ignore from "ignore";
 import chokidar from 'chokidar';
 import * as readline from 'readline';
+import { pathToFileURL } from 'url';
 import { mdxToHtml } from './mdx-to-html.js'
 
 
 // To-Set Properties
-const APP_NAME = "host-mdx"
-const DEFAULT_PORT = 3000
-const IGNORE_FILE_NAME = ".hostmdxignore"
-const CONFIG_FILE_NAME = "host-mdx.js"
+const APP_NAME = "host-mdx";
+const DEFAULT_PORT = 3000;
+const IGNORE_FILE_NAME = ".hostmdxignore";
+const CONFIG_FILE_NAME = "host-mdx.js";
+const NOT_FOUND_404_FILE = "404.html"
+const NOT_FOUND_404_MESSAGE = "404"
 const DEFAULT_IGNORES = `
 ${IGNORE_FILE_NAME}
 ${CONFIG_FILE_NAME}
@@ -22,21 +26,21 @@ node_modules
 package-lock.json
 package.json
 .git
-`
+`;
 
 
 // Flags
-const CREATE_FLAG = "--create-only"
-const CREATE_SHORT_FLAG = "-c"
-const HELP_FLAG = "--help"
-const HELP_SHORT_FLAG = "-h"
-const INPUT_PATH_FLAG = "--input-path"
-const OUTPUT_PATH_FLAG = "--output-path"
-const PORT_FLAG = "--port"
-const VERBOSE_FLAG = "--verobse"
-const VERBOSE_SHORT_FLAG = "-v"
-const TRACK_CHANGES_FLAG = "--track-changes"
-const TRACK_CHANGES_SHORT_FLAG = "-t"
+const CREATE_FLAG = "--create-only";
+const CREATE_SHORT_FLAG = "-c";
+const HELP_FLAG = "--help";
+const HELP_SHORT_FLAG = "-h";
+const INPUT_PATH_FLAG = "--input-path";
+const OUTPUT_PATH_FLAG = "--output-path";
+const PORT_FLAG = "--port";
+const VERBOSE_FLAG = "--verbose";
+const VERBOSE_SHORT_FLAG = "-v";
+const TRACK_CHANGES_FLAG = "--track-changes";
+const TRACK_CHANGES_SHORT_FLAG = "-t";
 
 
 // Messages & Errors
@@ -50,15 +54,15 @@ ${OUTPUT_PATH_FLAG}=...     The path to which all html files will be generated
 ${PORT_FLAG}=...            Localhost port number on which to host 
 ${TRACK_CHANGES_FLAG}, ${TRACK_CHANGES_SHORT_FLAG}   Tracks any changes made & auto reloads
 ${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}         Shows additional log messages
-`
+`;
 
 
 // Private Properties
-let isCreatingSite = false  // Prevents site from being recreated if creation is already ongoing
-let isVerbose = false
-let configs
-let server
-const TEMP_HTML_DIR = path.join(os.tmpdir(), `${APP_NAME}`)
+let isCreatingSite = false;  // Prevents site from being recreated if creation is already ongoing
+let isVerbose = false;
+let configs;
+let app;
+const TEMP_HTML_DIR = path.join(os.tmpdir(), `${APP_NAME}`);
 const TIME_OPTIONS = {
     year: 'numeric',
     month: 'long',
@@ -68,23 +72,7 @@ const TIME_OPTIONS = {
     second: 'numeric',
     hour12: false,
     fractionalSecondDigits: 3
-}
-const MIME_TYPE = {  // Maps extensions to mime protocol
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.js': 'text/javascript',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.ico': 'image/x-icon',
-    '.wav': 'audio/wav',
-    '.webp': 'image/webp',
-    '.mp3': 'audio/mpeg',
-    '.mp4': 'video/mp4',
-    '.svg': 'image/svg+xml',
-    '.pdf': 'application/pdf',
-    '.zip': 'application/zip',
-}
+};
 
 
 // Utility Methods
@@ -97,18 +85,16 @@ function log(msg, checkVerbose = false) {
     console.log(`[${APP_NAME} ${timestamp}] ${msg}`)
 }
 function createTempDir() {
-
-    // Delete existing temp dir
-    if (fs.existsSync(TEMP_HTML_DIR)) {
-        fs.rmSync(TEMP_HTML_DIR, { recursive: true, force: true })
-    }
-
-
     // Create default temp html dir
-    fs.mkdirSync(TEMP_HTML_DIR, { recursive: true })
+    fs.mkdirSync(TEMP_HTML_DIR, { recursive: true });
 
 
-    return fs.mkdtempSync(path.join(TEMP_HTML_DIR, `/html-`));
+    // Generate time stamp
+    const now = new Date()
+    const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1)}-${now.getDate()}T${now.getHours()}_${now.getMinutes()}_${now.getSeconds()}`
+
+
+    return fs.mkdtempSync(path.join(TEMP_HTML_DIR, `html-${timestamp}-`));
 }
 function getIgnore(ignoreFilePath) {
     const ig = ignore();
@@ -149,7 +135,8 @@ async function createSite(inputPath, outputPath) {
     // Get config properties
     let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`)
     if (fs.existsSync(configFilePath)) {
-        configs = await import(configFilePath);
+
+        configs = await import(pathToFileURL(configFilePath).href);
     }
 
 
@@ -174,17 +161,17 @@ async function createSite(inputPath, outputPath) {
     while (stack.length > 0) {
         // Continue if path does not exist
         const currentPath = stack.pop()
-        if(!fs.existsSync(currentPath)){
+        if (!fs.existsSync(currentPath)) {
             continue;
         }
 
-        
+
         // Get essentials
         const relToInput = path.relative(inputPath, currentPath)
         const toIgnore = inputPath != currentPath && ig.ignores(relToInput)
         const absToOutput = path.join(outputPath, relToInput)
         const isDir = fs.statSync(currentPath).isDirectory()
-        const isMdx = !isDir && absToOutput.endsWith(".mdx")
+        const isMdx = !isDir && currentPath.endsWith(".mdx")
 
 
         // Skip if to ignore this path
@@ -247,21 +234,81 @@ async function createSite(inputPath, outputPath) {
 
 
     // Broadcast site creation ended
-    log("Created site")
+    log(`Created site at ${outputPath}`)
     configs?.onSiteCreateEnd?.(inputPath, outputPath)
+}
+function filterArgs(rawArgs) {
+    // Assign to create
+    let toCreateOnly = rawArgs.includes(CREATE_FLAG) || rawArgs.includes(CREATE_SHORT_FLAG)
+
+
+    // Assign input path
+    let inputPath = rawArgs.find(val => val.startsWith(INPUT_PATH_FLAG));
+    let inputPathProvided = inputPath !== undefined;
+    inputPath = inputPathProvided ? inputPath.split('=')[1] : process.cwd();
+
+
+    // Check input path
+    if (!fs.existsSync(inputPath) || !fs.lstatSync(inputPath).isDirectory()) {
+        log(`Invalid input path "${inputPath}"`)
+        return null;
+    }
+    else {
+        inputPath = inputPath !== "" ? path.resolve(inputPath) : inputPath;  // To ensure input path is absolute
+    }
+
+
+    // Assign output path
+    let outputPath = rawArgs.find(val => val.startsWith(OUTPUT_PATH_FLAG));
+    let outputPathProvided = outputPath !== undefined;
+    outputPath = outputPathProvided ? outputPath.split('=')[1] : createTempDir();
+
+
+    // Check output path
+    if (!fs.existsSync(outputPath) || !fs.lstatSync(outputPath).isDirectory()) {
+        log(`Invalid output path "${outputPath}"`)
+        return null;
+    }
+    else {
+        outputPath = outputPath !== "" ? path.resolve(outputPath) : outputPath;  // To ensure output path is absolute
+    }
+
+
+    // Assign port
+    let port = rawArgs.find(val => val.startsWith(PORT_FLAG));
+    let portProvided = port !== undefined;
+    port = portProvided ? Number(port.split('=')[1]) : DEFAULT_PORT;
+
+
+    // Check port
+    if (!Number.isInteger(port)) {
+        log(`Invalid port`)
+        return null;
+    }
+
+
+    // Assign tracking changes
+    let toTrackChanges = rawArgs.includes(TRACK_CHANGES_FLAG) || rawArgs.includes(TRACK_CHANGES_SHORT_FLAG);
+
+
+    return { toCreateOnly, inputPath, inputPathProvided, outputPath, outputPathProvided, toTrackChanges, port, portProvided, };
 }
 
 
 // Main Methods
 async function createSiteSafe(...args) {
+
+    let success = true;
     try {
         await createSite(...args);
     }
     catch (err) {
-        isCreatingSite = false
-        console.log(err);
-        log("Failed to create site!");
+        success = false;
+        isCreatingSite = false;
+        log(`Failed to create site!\n${err}`);
     }
+
+    return success;
 }
 async function listenForKey(createSiteCallback) {
 
@@ -276,144 +323,104 @@ async function listenForKey(createSiteCallback) {
             createSiteCallback();
         }
         else if (key && key.sequence == '\x03') {
-            server.close((e) => { process.exit() })
+            app.server.close((e) => { process.exit() })
         }
     });
 }
 function startServer(htmlDir, port) {  // Starts server at given port
-    
+
     // Broadcast server starting
     configs?.onHostStart?.(port)
 
 
     // Start Server
-    const newServer = http.createServer((req, res) => {
+    const assets = sirv(htmlDir, { dev: true });
+    const newApp = polka({
+        onNoMatch: (req, res) => {
 
-        // Parse & Sanitize URL
-        let parsedUrl = new URL("http://" + req.headers.host + req.url)
-        let sanitizedUrl = path.normalize(parsedUrl.pathname).replace(/^(\.\.[\/\\])+/, '')
-        let isDirectory = !Boolean(path.parse(sanitizedUrl).ext)
-        let relativeFilePath = path.normalize(sanitizedUrl + (isDirectory ? "/index.html" : ""))
-        let absoluteFilePath = path.join(path.resolve(htmlDir), relativeFilePath)
-        let pathExists = fs.existsSync(absoluteFilePath)
+            // Set status code to 404
+            res.statusCode = 404;
 
-        // Respondes with content of file
-        if (pathExists)
-            // read file from file system
-            fs.readFile(absoluteFilePath, function (err, data) {
-                if (err) {
-                    res.statusCode = 500
-                    res.end(`Error getting the file: ${err}.`)
-                }
-                else {
-                    // Based on the URL path, extract the file extention. e.g. .js, .doc, ...
-                    const ext = path.parse(absoluteFilePath).ext
-                    res.setHeader('Content-type', MIME_TYPE[ext] || 'text/plain') // if the file is found, set Content-type and send data
-                    res.end(data)
-                }
 
-            })
-        else { // Respondes with 404 if file not found
-            res.statusCode = 404
-            res.end(`404 Invalid url not found!`)
+            // Send 404 file if found otherwise default not found message
+            const errorFile = path.join(htmlDir, NOT_FOUND_404_FILE);
+            if (fs.existsSync(errorFile)) {
+                res.setHeader('Content-Type', 'text/html');
+                res.end(fs.readFileSync(errorFile));
+            } else {
+                res.end(NOT_FOUND_404_MESSAGE);
+            }
         }
-    })
-    newServer.listen(port, () => { log(`Server listening at ${port} ... (Press 'r' to manually reload, Press 'Ctrl+c' to exit)`) })
-    newServer.on("close", () => { configs?.onHostEnd?.(port) });
-    newServer.on("error", (e) => { log(`Error Starting server ${e.message}`); throw e; });
+    }).use(assets)
+
+    newApp.listen(port)
+    newApp.server.on("close", () => { configs?.onHostEnd?.(port) });
+    newApp.server.on("error", (e) => { log(`Failed to start server: ${e.message}`); throw e; });
+    log(`Server listening at ${port} ... (Press 'r' to manually reload, Press 'Ctrl+c' to exit)`)
 
 
-    return newServer
+    return newApp
 }
 async function Main() {
     // Get all arguments
-    const args = process.argv.slice(2)
+    const rawArgs = process.argv.slice(2);
+
+
+    // Check if verbose
+    isVerbose = rawArgs.includes(VERBOSE_FLAG) || rawArgs.includes(VERBOSE_SHORT_FLAG);
 
 
     // Check if asked for help
-    if (args.includes(HELP_FLAG) || args.includes(HELP_SHORT_FLAG)) {
+    if (rawArgs.includes(HELP_FLAG) || rawArgs.includes(HELP_SHORT_FLAG)) {
         console.log(HELP_MESSAGE)
         return;
     }
 
 
-    // Assign to create
-    let toCreateOnly = args.includes(CREATE_FLAG) || args.includes(CREATE_SHORT_FLAG)
-
-    // Assign input path
-    let inputPath = args.find(val => val.startsWith(INPUT_PATH_FLAG))
-    inputPath = inputPath !== undefined ? inputPath.split('=')[1] : process.cwd()
-
-    // Assign output path
-    let outputPath = args.find(val => val.startsWith(OUTPUT_PATH_FLAG))
-    let outputPathProvided = outputPath !== undefined
-    outputPath = outputPathProvided ? outputPath.split('=')[1] : createTempDir()
-
-    // Assign tracking changes
-    let toTrackChanges = args.includes(TRACK_CHANGES_FLAG) || args.includes(TRACK_CHANGES_SHORT_FLAG)
-
-    // Assign port
-    let port = args.find(val => val.startsWith(PORT_FLAG))
-    port = port !== undefined ? Number(port.split('=')[1]) : DEFAULT_PORT
-
-    // Assign verbose
-    isVerbose = args.includes(VERBOSE_FLAG) || args.includes(VERBOSE_SHORT_FLAG)
-
-
-    // Check input path
-    if (!fs.existsSync(inputPath) || !fs.lstatSync(inputPath).isDirectory()) {
-        log(`Invalid input path "${inputPath}"`)
-        return
-    }
-
-    // Check output path
-    if (!fs.existsSync(outputPath) || !fs.lstatSync(outputPath).isDirectory()) {
-        log(`Invalid output path "${outputPath}"`)
-        return
-    }
-
-    // Check port
-    if (!Number.isInteger(port)) {
-        log(`Invalid port`)
-        return
+    // Filter arguments
+    let args = filterArgs(rawArgs);
+    if (args === null) {
+        return;
     }
 
 
     // Create site from mdx & return if only needed to create site
-    await createSiteSafe(inputPath, outputPath)
-    if (toCreateOnly) {
+    let wasCreated = await createSiteSafe(args.inputPath, args.outputPath);
+    if (args.toCreateOnly) {
+        process.exitCode = !wasCreated ? 1 : 0;  // Exit with error code if not created successfully
         return;
     }
 
 
     // Watch for key presses
-    listenForKey(() => createSiteSafe(inputPath, outputPath))
+    listenForKey(() => createSiteSafe(args.inputPath, args.outputPath));
 
 
     // Watch for changes
-    if (toTrackChanges) {
-        chokidar.watch(inputPath, { 
+    if (args.toTrackChanges) {
+        chokidar.watch(args.inputPath, {
             ignoreInitial: true,
             ignored: (path, stats) => isCreatingSite  // Ignore if site creation is ongoing
         }).on('all', (event, path) => {
-            createSiteSafe(inputPath, outputPath)
+            createSiteSafe(args.inputPath, args.outputPath)
         });
     }
 
 
     // Start server
-    server = startServer(outputPath, port)
+    app = startServer(args.outputPath, args.port);
 
 
     // Handle quit
-    process.on("exit", () => {
+    const cleanup = () => {
         // Remove html path
-        if (!outputPathProvided && fs.existsSync(outputPath)) {
-            fs.rmSync(outputPath, { recursive: true, force: true })
+        if (!args.outputPathProvided && fs.existsSync(args.outputPath)) {
+            fs.rmSync(args.outputPath, { recursive: true, force: true })
         }
-
-        process.exit(0);
-    });
+    }
+    process.on("exit", cleanup);
+    process.on("SIGINT", cleanup);
+    process.on("SIGTERM", cleanup);
 }
 
 Main()
