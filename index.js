@@ -59,6 +59,7 @@ ${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}         Shows additional log messages
 
 // Private Properties
 let isCreatingSite = false;  // Prevents site from being recreated if creation is already ongoing
+let isCreateSitePending = false  // Keeps track if files have been modified and site needs to be recreated
 let isVerbose = false;
 let configs;
 let app;
@@ -123,13 +124,15 @@ function createFile(filePath, fileContent = "") {
 async function createSite(inputPath, outputPath) {
     // Exit if already creating
     if (isCreatingSite) {
-        log("site creation already ongoing!")
+        log("Site creation already ongoing! Added to pending")
+        isCreateSitePending = true
         return
     }
 
 
     // Set creating status to ongoing
     isCreatingSite = true
+    isCreateSitePending = false
 
 
     // Get config properties
@@ -158,7 +161,7 @@ async function createSite(inputPath, outputPath) {
 
     // Iterate through all folders & files
     const stack = [inputPath];
-    while (stack.length > 0) {
+    while (stack.length > 0 && !isCreateSitePending) {
         // Continue if path does not exist
         const currentPath = stack.pop()
         if (!fs.existsSync(currentPath)) {
@@ -235,7 +238,13 @@ async function createSite(inputPath, outputPath) {
 
     // Broadcast site creation ended
     log(`Created site at ${outputPath}`)
-    configs?.onSiteCreateEnd?.(inputPath, outputPath)
+    configs?.onSiteCreateEnd?.(inputPath, outputPath, isCreateSitePending)
+
+
+    // Reinvoke creation
+    if(isCreateSitePending){
+        await createSite(inputPath, outputPath);
+    }
 }
 function filterArgs(rawArgs) {
     // Assign to create
@@ -399,8 +408,7 @@ async function Main() {
     // Watch for changes
     if (args.toTrackChanges) {
         chokidar.watch(args.inputPath, {
-            ignoreInitial: true,
-            ignored: (path, stats) => isCreatingSite  // Ignore if site creation is ongoing
+            ignoreInitial: true
         }).on('all', (event, path) => {
             createSiteSafe(args.inputPath, args.outputPath)
         });

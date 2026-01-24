@@ -4,7 +4,7 @@
 
 A cli tool to create and serve a static html website from a given mdx directory
 
-## Usage
+## 🛠️ Usage
 
 ```
 host-mdx [options]
@@ -18,12 +18,15 @@ Options:
 --track-changes, -t   Tracks any changes made & auto reloads
 --verobse, -v         Shows additional log messages
 ```
+  
+> If `--input-path` is not provided it will default to `./` i.e. current working directory  
+> If `--output-path` is not provided a temp folder will be created automatically & deleted upon exit
 
 Add a file by the name `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
 (similar to [.gitignore](https://git-scm.com/docs/gitignore)) 
 
 
-Add a file by the name `host-mdx.js` at the root of your project as a config file with the following:
+Add a file by the name `host-mdx.js` at the root of your input folder as a config file with the following:
 
 ```js
 // Modify
@@ -32,18 +35,19 @@ modBundleMDXSettings(settings)
 
 // Hooks
 onSiteCreateStart(inputPath, outputPath)
-onSiteCreateEnd(inputPath, outputPath)
+onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
 onFileCreateStart(inputFilePath, outputFilePath)
 onFileCreateEnd(inputFilePath, outputFilePath)
 ```
 > Note: Any changes made to `host-mdx.js` require complete restart otherwise changes will not reflect
 
-## Example
+## 📖 Example
 
 Command:
 ```bash
 npx host-mdx --input-path="path/to/my-website-template" --output-path="path/to/my-website" --port=3113 -t
 ```
+
 
 Input Directory:
 ```
@@ -82,7 +86,7 @@ export function onSiteCreateStart(inputPath, outputPath) {
    console.log("onSiteCreateStart", inputPath, outputPath)
 }
 export function onSiteCreateEnd(inputPath, outputPath, wasSuccessful){
-   console.log("onSiteCreateEnd", inputPath, outputPath)
+   console.log("onSiteCreateEnd", inputPath, outputPath, wasSuccessful)
 }
 export function onFileCreateStart(inputFilePath, outputFilePath){
    console.log("onFileCreateStart", inputFilePath, outputFilePath)
@@ -120,4 +124,7 @@ my-website/
 
 The site will now be visible in the browser at `localhost:3113`
 
-> For a live example take a look at [sourcesnippet.github.io](https://sourcesnippet.github.io/)
+
+## 🔑 License
+
+MIT © [Manas Ravindra Makde](https://manasmakde.github.io/)
