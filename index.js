@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 
-import fs from 'fs'
-import os from 'os'
+import fs from 'fs';
+import os from 'os';
+import net from 'net';
 import path from 'path'
-import polka from 'polka';
 import sirv from 'sirv';
-import ignore from "ignore";
+import polka from 'polka';
+import ignore from 'ignore';
 import chokidar from 'chokidar';
 import * as readline from 'readline';
 import { pathToFileURL } from 'url';
-import { mdxToHtml } from './mdx-to-html.js'
+import { mdxToHtml } from './mdx-to-html.js';
 
 
 // To-Set Properties
 const APP_NAME = "host-mdx";
 const DEFAULT_PORT = 3000;
+const MAX_PORT = 3002;
 const IGNORE_FILE_NAME = ".hostmdxignore";
 const CONFIG_FILE_NAME = "host-mdx.js";
-const NOT_FOUND_404_FILE = "404.html"
-const NOT_FOUND_404_MESSAGE = "404"
+const FILE_404 = "404.html";
+const NOT_FOUND_404_MESSAGE = "404";
 const DEFAULT_IGNORES = `
 ${IGNORE_FILE_NAME}
 ${CONFIG_FILE_NAME}
@@ -26,6 +28,8 @@ node_modules
 package-lock.json
 package.json
 .git
+.github
+.gitignore
 `;
 
 
@@ -135,14 +139,6 @@ async function createSite(inputPath, outputPath) {
     isCreateSitePending = false
 
 
-    // Get config properties
-    let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`)
-    if (fs.existsSync(configFilePath)) {
-
-        configs = await import(pathToFileURL(configFilePath).href);
-    }
-
-
     // Broadcast site creation started
     log("Creating site...")
     configs?.onSiteCreateStart?.(inputPath, outputPath)
@@ -202,7 +198,12 @@ async function createSite(inputPath, outputPath) {
             // convert mdx code into html & paste into file
             let mdxCode = fs.readFileSync(currentPath, 'utf8');
             let parentDir = path.dirname(currentPath)
-            let htmlCode = await mdxToHtml(mdxCode, parentDir, configs?.modBundleMDXSettings);
+            let globalArgs = {
+                hostmdxCwd: parentDir,
+                hostmdxInputPath: inputPath,
+                hostmdxOutputPath: outputPath
+            };
+            let htmlCode = await mdxToHtml(mdxCode, parentDir, globalArgs, (settings) => { return configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
             createFile(absHtmlPath, `<!DOCTYPE html>\n${htmlCode}`);
 
 
@@ -237,16 +238,75 @@ async function createSite(inputPath, outputPath) {
 
 
     // Broadcast site creation ended
-    log(`Created site at ${outputPath}`)
+    if (isCreateSitePending) {
+        log(`Restarting site creation...`)
+    }
+    else {
+        log(`Created site at ${outputPath}`)
+    }
     configs?.onSiteCreateEnd?.(inputPath, outputPath, isCreateSitePending)
 
 
     // Reinvoke creation
-    if(isCreateSitePending){
+    if (isCreateSitePending) {
         await createSite(inputPath, outputPath);
     }
 }
-function filterArgs(rawArgs) {
+async function isPortAvailable(port) {
+    const server = net.createServer();
+    server.unref();
+
+    return new Promise((resolve) => {
+        server.once('error', () => {
+            server.close();
+            resolve(false);
+        });
+
+        server.once('listening', () => {
+            server.close(() => resolve(true));
+        });
+
+        server.listen(port);
+    });
+}
+async function getAvailablePort(startPort, maxPort) {
+    let currentPort = startPort;
+    while (currentPort <= maxPort) {
+        if (await isPortAvailable(currentPort)) {
+            return currentPort;
+        }
+
+        currentPort++;
+    }
+
+    return -1;
+}
+function stripTrailingSep(thePath) {
+    if (thePath[thePath.length - 1] === path.sep) {
+        return thePath.slice(0, -1);
+    }
+    return thePath;
+}
+function isSubPath(potentialParent, thePath) {
+    // For inside-directory checking, we want to allow trailing slashes, so normalize.
+    thePath = stripTrailingSep(thePath);
+    potentialParent = stripTrailingSep(potentialParent);
+
+
+    // Node treats only Windows as case-insensitive in its path module; we follow those conventions.
+    if (process.platform === "win32") {
+        thePath = thePath.toLowerCase();
+        potentialParent = potentialParent.toLowerCase();
+    }
+
+
+    return thePath.lastIndexOf(potentialParent, 0) === 0 &&
+        (
+            thePath[potentialParent.length] === path.sep ||
+            thePath[potentialParent.length] === undefined
+        );
+};
+async function filterArgs(rawArgs) {
     // Assign to create
     let toCreateOnly = rawArgs.includes(CREATE_FLAG) || rawArgs.includes(CREATE_SHORT_FLAG)
 
@@ -283,14 +343,25 @@ function filterArgs(rawArgs) {
     }
 
 
+    // Check if output path is inside input path (causing infinite loop)
+    if (isSubPath(inputPath, outputPath)) {
+        log(`Output path "${outputPath}" cannot be inside or same as input path "${inputPath}"`);
+        return null;
+    }
+
+
     // Assign port
     let port = rawArgs.find(val => val.startsWith(PORT_FLAG));
     let portProvided = port !== undefined;
-    port = portProvided ? Number(port.split('=')[1]) : DEFAULT_PORT;
+    port = portProvided ? Number(port.split('=')[1]) : (await getAvailablePort(DEFAULT_PORT, MAX_PORT));
 
 
     // Check port
-    if (!Number.isInteger(port)) {
+    if (port === -1) {
+        log(`Could not find any available ports between ${DEFAULT_PORT} to ${MAX_PORT}, Try manually passing ${PORT_FLAG}=... flag`);
+        return null;
+    }
+    else if (!Number.isInteger(port)) {
         log(`Invalid port`)
         return null;
     }
@@ -314,7 +385,7 @@ async function createSiteSafe(...args) {
     catch (err) {
         success = false;
         isCreatingSite = false;
-        log(`Failed to create site!\n${err}`);
+        log(`Failed to create site!\n${err.stack}`);
     }
 
     return success;
@@ -332,9 +403,14 @@ async function listenForKey(createSiteCallback) {
             createSiteCallback();
         }
         else if (key && key.sequence == '\x03') {
-            app.server.close((e) => { process.exit() })
+            app?.server?.close((e) => { process.exit() })
         }
     });
+}
+async function watchForChanges(pathTowatch, callback) {
+    chokidar.watch(pathTowatch, {
+        ignoreInitial: true
+    }).on('all', callback);
 }
 function startServer(htmlDir, port) {  // Starts server at given port
 
@@ -346,13 +422,12 @@ function startServer(htmlDir, port) {  // Starts server at given port
     const assets = sirv(htmlDir, { dev: true });
     const newApp = polka({
         onNoMatch: (req, res) => {
-
             // Set status code to 404
             res.statusCode = 404;
 
 
-            // Send 404 file if found otherwise default not found message
-            const errorFile = path.join(htmlDir, NOT_FOUND_404_FILE);
+            // Send 404 file if found else not found message
+            const errorFile = path.join(htmlDir, FILE_404);
             if (fs.existsSync(errorFile)) {
                 res.setHeader('Content-Type', 'text/html');
                 res.end(fs.readFileSync(errorFile));
@@ -360,8 +435,16 @@ function startServer(htmlDir, port) {  // Starts server at given port
                 res.end(NOT_FOUND_404_MESSAGE);
             }
         }
+    }).use((req, res, next) => {  // Add trailing slash
+        if (1 < req.path.length && !req.path.endsWith('/') && !path.extname(req.path)) {
+            res.writeHead(301, { Location: req.path + '/' });
+            return res.end();
+        }
+        next();
     }).use(assets)
 
+
+    // Start listening
     newApp.listen(port)
     newApp.server.on("close", () => { configs?.onHostEnd?.(port) });
     newApp.server.on("error", (e) => { log(`Failed to start server: ${e.message}`); throw e; });
@@ -371,6 +454,7 @@ function startServer(htmlDir, port) {  // Starts server at given port
     return newApp
 }
 async function Main() {
+
     // Get all arguments
     const rawArgs = process.argv.slice(2);
 
@@ -387,9 +471,16 @@ async function Main() {
 
 
     // Filter arguments
-    let args = filterArgs(rawArgs);
+    let args = await filterArgs(rawArgs);
     if (args === null) {
         return;
+    }
+
+
+    // Get config
+    let configFilePath = path.join(args.inputPath, `./${CONFIG_FILE_NAME}`)
+    if (fs.existsSync(configFilePath)) {
+        configs = await import(pathToFileURL(configFilePath).href);
     }
 
 
@@ -407,9 +498,12 @@ async function Main() {
 
     // Watch for changes
     if (args.toTrackChanges) {
-        chokidar.watch(args.inputPath, {
-            ignoreInitial: true
-        }).on('all', (event, path) => {
+        watchForChanges(args.inputPath, (event, path) => {
+            if (typeof configs.toTriggerRecreate === 'function' && !configs?.toTriggerRecreate(event, path)) {
+                return;
+            }
+
+            log(`Recreating site, Event: ${event}, Path: ${path}`, true)
             createSiteSafe(args.inputPath, args.outputPath)
         });
     }
@@ -425,6 +519,8 @@ async function Main() {
         if (!args.outputPathProvided && fs.existsSync(args.outputPath)) {
             fs.rmSync(args.outputPath, { recursive: true, force: true })
         }
+
+        process.stdin.setRawMode(false);
     }
     process.on("exit", cleanup);
     process.on("SIGINT", cleanup);

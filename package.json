@@ -10,6 +10,13 @@
   "bin": {
     "host-mdx": "index.js"
   },
+  "bugs": {
+    "url": "https://github.com/ManasMakde/host-mdx/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ManasMakde/host-mdx.git"
+  },
   "dependencies": {
     "chokidar": "^5.0.0",
     "ignore": "^7.0.5",
@@ -25,7 +32,7 @@
     "mdx"
   ],
   "author": "Manas Makde",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@babel/preset-react": "^7.28.5",
     "@babel/register": "^7.28.3"

@@ -1,11 +1,9 @@
 # host-mdx
-
-[![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx )
-
+[![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx)  
 A cli tool to create and serve a static html website from a given mdx directory
 
-## 🛠️ Usage
 
+## 🛠️ Usage
 ```
 host-mdx [options]
 
@@ -29,25 +27,22 @@ Add a file by the name `.hostmdxignore` at the root of your project to filter ou
 Add a file by the name `host-mdx.js` at the root of your input folder as a config file with the following:
 
 ```js
-// Modify
-modBundleMDXSettings(settings)
-
-
-// Hooks
 onSiteCreateStart(inputPath, outputPath)
 onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
 onFileCreateStart(inputFilePath, outputFilePath)
 onFileCreateEnd(inputFilePath, outputFilePath)
+modBundleMDXSettings(inputPath, outputPath, settings)
+toTriggerRecreate(event, path)
 ```
-> Note: Any changes made to `host-mdx.js` require complete restart otherwise changes will not reflect
+
+> **Note:** Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
+
 
 ## 📖 Example
-
 Command:
 ```bash
 npx host-mdx --input-path="path/to/my-website-template" --output-path="path/to/my-website" --port=3113 -t
 ```
-
 
 Input Directory:
 ```
@@ -85,24 +80,32 @@ static/temp.jpg
 export function onSiteCreateStart(inputPath, outputPath) {
    console.log("onSiteCreateStart", inputPath, outputPath)
 }
-export function onSiteCreateEnd(inputPath, outputPath, wasSuccessful){
+export function onSiteCreateEnd(inputPath, outputPath, wasSuccessful) {
    console.log("onSiteCreateEnd", inputPath, outputPath, wasSuccessful)
 }
-export function onFileCreateStart(inputFilePath, outputFilePath){
+export function onFileCreateStart(inputFilePath, outputFilePath) {
    console.log("onFileCreateStart", inputFilePath, outputFilePath)
 }
-export function onFileCreateEnd(inputFilePath, outputFilePath){
+export function onFileCreateEnd(inputFilePath, outputFilePath) {
    console.log("onFileCreateEnd", inputFilePath, outputFilePath)
 }
-export function onHostStart(port){
+export function onHostStart(port) {
    console.log("onHostStart", port)
 }
-export function onHostEnd(port){
+export function onHostEnd(port) {
    console.log("onHostEnd", port)
 }
-export function modBundleMDXSettings(settings){
+export function modBundleMDXSettings(inputPath, outputPath, settings) {
    // Modify settings ...
    return settings
+}
+export function toTriggerRecreate(event, path) {
+   const isGOutputStream = /\.goutputstream-\w+$/.test(path);
+   if (isGOutputStream) {
+      return false;
+   }
+   
+   return true;
 }
 ```
 
@@ -126,5 +129,4 @@ The site will now be visible in the browser at `localhost:3113`
 
 
 ## 🔑 License
-
 MIT © [Manas Ravindra Makde](https://manasmakde.github.io/)

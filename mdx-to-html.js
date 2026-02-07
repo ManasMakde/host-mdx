@@ -32,7 +32,7 @@ function getMDXComponent(code, globals) {
   const mdxExport = fn(...Object.values(globals));
   return mdxExport.default;
 }
-export async function mdxToHtml(mdxCode, baseUrl, modSettingsCallback = undefined) {
+export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCallback = undefined) {
 
   // Assign default settings
   let settings = {
@@ -61,7 +61,7 @@ export async function mdxToHtml(mdxCode, baseUrl, modSettingsCallback = undefine
 
   // Generate html
   const { code } = await bundleMDX(settings);
-  const Component = getMDXComponent(code, { Preact, PreactDOM, _jsx_runtime, require: nativeRequire, cwd: baseUrl })
+  const Component = getMDXComponent(code, { Preact, PreactDOM, _jsx_runtime, require: nativeRequire, ...globalArgs })
 
 
   return renderToString(Preact.h(Component, {}));
