@@ -1,6 +1,6 @@
 {
   "name": "host-mdx",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "A cli tool to create and serve a static html website from a given mdx directory",
   "main": "index.js",
   "type": "module",
