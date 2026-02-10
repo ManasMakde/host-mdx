@@ -1,9 +1,10 @@
 # host-mdx
-[![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx)  
+
+[![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx)\
 A cli tool to create and serve a static html website from a given mdx directory
 
-
 ## 🛠️ Usage
+
 ```
 host-mdx [options]
 
@@ -16,35 +17,44 @@ Options:
 --track-changes, -t   Tracks any changes made & auto reloads
 --verobse, -v         Shows additional log messages
 ```
-  
-> If `--input-path` is not provided it will default to `./` i.e. current working directory  
+
+> If `--input-path` is not provided it will default to `./` i.e. current working directory\
 > If `--output-path` is not provided a temp folder will be created automatically & deleted upon exit
 
 Add a file by the name `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
-(similar to [.gitignore](https://git-scm.com/docs/gitignore)) 
-
+(similar to [.gitignore](https://git-scm.com/docs/gitignore))
 
 Add a file by the name `host-mdx.js` at the root of your input folder as a config file with the following:
 
 ```js
 onSiteCreateStart(inputPath, outputPath)
 onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
-onFileCreateStart(inputFilePath, outputFilePath)
-onFileCreateEnd(inputFilePath, outputFilePath)
+onFileCreateStart(inputPath, outputPath, inFilePath, outFilePath)
+onFileCreateEnd(inputPath, outputPath, inFilePath, outFilePath, result)
 modBundleMDXSettings(inputPath, outputPath, settings)
 toTriggerRecreate(event, path)
 ```
 
 > **Note:** Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
 
+Global variables you can use inside the .mdx files:
+
+```
+hostmdxCwd 
+hostmdxInputPath 
+hostmdxOutputPath
+```
 
 ## 📖 Example
+
 Command:
+
 ```bash
 npx host-mdx --input-path="path/to/my-website-template" --output-path="path/to/my-website" --port=3113 -t
 ```
 
 Input Directory:
+
 ```
 my-website-template/
 ├─ index.mdx
@@ -68,6 +78,7 @@ my-website-template/
 ```
 
 `.hostmdxignore` file content:
+
 ```sh
 *.jsx
 blog/page2/
@@ -76,6 +87,7 @@ static/temp.jpg
 ```
 
 `host-mdx.js` file content:
+
 ```js
 export function onSiteCreateStart(inputPath, outputPath) {
    console.log("onSiteCreateStart", inputPath, outputPath)
@@ -110,6 +122,7 @@ export function toTriggerRecreate(event, path) {
 ```
 
 Output Directory:
+
 ```
 my-website/
 ├─ index.html
@@ -127,6 +140,6 @@ my-website/
 
 The site will now be visible in the browser at `localhost:3113`
 
-
 ## 🔑 License
+
 MIT © [Manas Ravindra Makde](https://manasmakde.github.io/)

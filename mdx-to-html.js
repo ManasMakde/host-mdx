@@ -27,10 +27,9 @@ const jsxBundlerConfig = {
 
 
 // Methods
-function getMDXComponent(code, globals) {
+function getMDXExport(code, globals) {
   const fn = new Function(...Object.keys(globals), code);
-  const mdxExport = fn(...Object.values(globals));
-  return mdxExport.default;
+  return fn(...Object.values(globals));
 }
 export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCallback = undefined) {
 
@@ -61,8 +60,12 @@ export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCa
 
   // Generate html
   const { code } = await bundleMDX(settings);
-  const Component = getMDXComponent(code, { Preact, PreactDOM, _jsx_runtime, require: nativeRequire, ...globalArgs })
+  const Exports = getMDXExport(code, { Preact, PreactDOM, _jsx_runtime, require: nativeRequire, ...globalArgs });
+  const Component = Exports.default;
 
 
-  return renderToString(Preact.h(Component, {}));
+  return {
+    html: renderToString(Preact.h(Component, {})),
+    exports: Exports
+  }
 }

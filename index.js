@@ -182,9 +182,9 @@ async function createSite(inputPath, outputPath) {
         // Make dir
         if (isDir) {
             log(`${currentPath} ---> ${absToOutput}`, true)
-            configs?.onFileCreateStart?.(currentPath, absToOutput)
+            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.mkdirSync(absToOutput, { recursive: true });
-            configs?.onFileCreateEnd?.(currentPath, absToOutput)
+            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
         }
         // Make html file from mdx
         else if (!isDir && isMdx) {
@@ -192,7 +192,7 @@ async function createSite(inputPath, outputPath) {
             // Broadcast file creation started
             let absHtmlPath = path.format({ ...path.parse(absToOutput), base: '', ext: '.html' })
             log(`${currentPath} ---> ${absHtmlPath}`, true)
-            configs?.onFileCreateStart?.(currentPath, absHtmlPath)
+            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath, undefined)
 
 
             // convert mdx code into html & paste into file
@@ -203,19 +203,20 @@ async function createSite(inputPath, outputPath) {
                 hostmdxInputPath: inputPath,
                 hostmdxOutputPath: outputPath
             };
-            let htmlCode = await mdxToHtml(mdxCode, parentDir, globalArgs, (settings) => { return configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
+            let result = await mdxToHtml(mdxCode, parentDir, globalArgs, (settings) => { return configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
+            let htmlCode = result.html;
             createFile(absHtmlPath, `<!DOCTYPE html>\n${htmlCode}`);
 
 
             // Broadcast file creation ended
-            configs?.onFileCreateEnd?.(currentPath, absHtmlPath)
+            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absHtmlPath, result)
         }
         // Copy paste file
         else if (!isDir) {
             log(`${currentPath} ---> ${absToOutput}`, true)
-            configs?.onFileCreateStart?.(currentPath, absToOutput)
+            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.copyFileSync(currentPath, absToOutput)
-            configs?.onFileCreateEnd?.(currentPath, absToOutput)
+            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
         }
 
 
@@ -305,7 +306,7 @@ function isSubPath(potentialParent, thePath) {
             thePath[potentialParent.length] === path.sep ||
             thePath[potentialParent.length] === undefined
         );
-};
+}
 async function filterArgs(rawArgs) {
     // Assign to create
     let toCreateOnly = rawArgs.includes(CREATE_FLAG) || rawArgs.includes(CREATE_SHORT_FLAG)
