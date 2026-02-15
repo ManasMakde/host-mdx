@@ -141,7 +141,7 @@ async function createSite(inputPath, outputPath) {
 
     // Broadcast site creation started
     log("Creating site...")
-    configs?.onSiteCreateStart?.(inputPath, outputPath)
+    await configs?.onSiteCreateStart?.(inputPath, outputPath)
 
 
     // Remove html folder if it already exists
@@ -182,9 +182,9 @@ async function createSite(inputPath, outputPath) {
         // Make dir
         if (isDir) {
             log(`${currentPath} ---> ${absToOutput}`, true)
-            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
+            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.mkdirSync(absToOutput, { recursive: true });
-            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
+            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
         }
         // Make html file from mdx
         else if (!isDir && isMdx) {
@@ -192,7 +192,7 @@ async function createSite(inputPath, outputPath) {
             // Broadcast file creation started
             let absHtmlPath = path.format({ ...path.parse(absToOutput), base: '', ext: '.html' })
             log(`${currentPath} ---> ${absHtmlPath}`, true)
-            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath, undefined)
+            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath, undefined)
 
 
             // convert mdx code into html & paste into file
@@ -203,20 +203,20 @@ async function createSite(inputPath, outputPath) {
                 hostmdxInputPath: inputPath,
                 hostmdxOutputPath: outputPath
             };
-            let result = await mdxToHtml(mdxCode, parentDir, globalArgs, (settings) => { return configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
+            let result = await mdxToHtml(mdxCode, parentDir, globalArgs, async (settings) => { return await configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
             let htmlCode = result.html;
             createFile(absHtmlPath, `<!DOCTYPE html>\n${htmlCode}`);
 
 
             // Broadcast file creation ended
-            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absHtmlPath, result)
+            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absHtmlPath, result)
         }
         // Copy paste file
         else if (!isDir) {
             log(`${currentPath} ---> ${absToOutput}`, true)
-            configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
+            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.copyFileSync(currentPath, absToOutput)
-            configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
+            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
         }
 
 
@@ -245,7 +245,7 @@ async function createSite(inputPath, outputPath) {
     else {
         log(`Created site at ${outputPath}`)
     }
-    configs?.onSiteCreateEnd?.(inputPath, outputPath, isCreateSitePending)
+    await configs?.onSiteCreateEnd?.(inputPath, outputPath, isCreateSitePending)
 
 
     // Reinvoke creation
@@ -413,10 +413,10 @@ async function watchForChanges(pathTowatch, callback) {
         ignoreInitial: true
     }).on('all', callback);
 }
-function startServer(htmlDir, port) {  // Starts server at given port
+async function startServer(htmlDir, port) {  // Starts server at given port
 
     // Broadcast server starting
-    configs?.onHostStart?.(port)
+    await configs?.onHostStart?.(port)
 
 
     // Start Server
@@ -447,7 +447,7 @@ function startServer(htmlDir, port) {  // Starts server at given port
 
     // Start listening
     newApp.listen(port)
-    newApp.server.on("close", () => { configs?.onHostEnd?.(port) });
+    newApp.server.on("close", async () => { await configs?.onHostEnd?.(port) });
     newApp.server.on("error", (e) => { log(`Failed to start server: ${e.message}`); throw e; });
     log(`Server listening at ${port} ... (Press 'r' to manually reload, Press 'Ctrl+c' to exit)`)
 
@@ -481,6 +481,7 @@ async function Main() {
     // Get config
     let configFilePath = path.join(args.inputPath, `./${CONFIG_FILE_NAME}`)
     if (fs.existsSync(configFilePath)) {
+        log(`Importing config file ${CONFIG_FILE_NAME}`);
         configs = await import(pathToFileURL(configFilePath).href);
     }
 
@@ -499,8 +500,8 @@ async function Main() {
 
     // Watch for changes
     if (args.toTrackChanges) {
-        watchForChanges(args.inputPath, (event, path) => {
-            if (typeof configs.toTriggerRecreate === 'function' && !configs?.toTriggerRecreate(event, path)) {
+        watchForChanges(args.inputPath, async (event, path) => {
+            if (typeof configs.toTriggerRecreate === 'function' && !(await configs?.toTriggerRecreate(event, path))) {
                 return;
             }
 
@@ -511,7 +512,7 @@ async function Main() {
 
 
     // Start server
-    app = startServer(args.outputPath, args.port);
+    app = await startServer(args.outputPath, args.port);
 
 
     // Handle quit

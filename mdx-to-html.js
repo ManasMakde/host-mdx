@@ -54,7 +54,7 @@ export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCa
 
   // Modify settings
   if (modSettingsCallback !== undefined) {
-    settings = modSettingsCallback(settings)
+    settings = await modSettingsCallback(settings)
   }
 
 
