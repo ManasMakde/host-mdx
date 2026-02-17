@@ -21,10 +21,10 @@ Options:
 > If `--input-path` is not provided it will default to `./` i.e. current working directory\
 > If `--output-path` is not provided a temp folder will be created automatically & deleted upon exit
 
-Add a file by the name `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
+You can add a file by the name `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
 (similar to [.gitignore](https://git-scm.com/docs/gitignore))
 
-Add a file by the name `host-mdx.js` at the root of your input folder as a config file with the following:
+You can also add a file by the name `host-mdx.js` at the root of your input folder as a config file with access to the following:
 
 ```js
 onSiteCreateStart(inputPath, outputPath)
@@ -32,6 +32,7 @@ onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
 onFileCreateStart(inputPath, outputPath, inFilePath, outFilePath)
 onFileCreateEnd(inputPath, outputPath, inFilePath, outFilePath, result)
 modBundleMDXSettings(inputPath, outputPath, settings)
+modGlobalArgs(inputPath, outputPath, globalArgs)
 toTriggerRecreate(event, path)
 ```
 

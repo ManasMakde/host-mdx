@@ -203,6 +203,7 @@ async function createSite(inputPath, outputPath) {
                 hostmdxInputPath: inputPath,
                 hostmdxOutputPath: outputPath
             };
+            globalArgs = await configs?.modGlobalArgs?.(inputPath, outputPath, globalArgs) ?? globalArgs;
             let result = await mdxToHtml(mdxCode, parentDir, globalArgs, async (settings) => { return await configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
             let htmlCode = result.html;
             createFile(absHtmlPath, `<!DOCTYPE html>\n${htmlCode}`);
