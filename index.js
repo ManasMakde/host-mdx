@@ -501,7 +501,7 @@ async function Main() {
     // Watch for changes
     if (args.toTrackChanges) {
         watchForChanges(args.inputPath, async (event, path) => {
-            if (typeof configs.toTriggerRecreate === 'function' && !(await configs?.toTriggerRecreate(event, path))) {
+            if (typeof configs?.toTriggerRecreate === 'function' && !(await configs?.toTriggerRecreate(event, path))) {
                 return;
             }
 

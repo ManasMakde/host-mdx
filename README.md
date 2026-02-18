@@ -37,7 +37,7 @@ toTriggerRecreate(event, path)
 
 > **Note:** Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
 
-Global variables you can use inside the .mdx files:
+Default global variables you can use inside any .mdx files:
 
 ```
 hostmdxCwd 
