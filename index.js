@@ -192,12 +192,19 @@ async function createSite(inputPath, outputPath) {
             // Broadcast file creation started
             let absHtmlPath = path.format({ ...path.parse(absToOutput), base: '', ext: '.html' })
             log(`${currentPath} ---> ${absHtmlPath}`, true)
-            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath, undefined)
+            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath)
 
 
-            // convert mdx code into html & paste into file
+            // Intercept mdx code
             let mdxCode = fs.readFileSync(currentPath, 'utf8');
-            let parentDir = path.dirname(currentPath)
+            if (typeof configs?.modMDXCode === 'function') {
+                log(`Modifying mdx code of ${currentPath}`, true);
+                mdxCode = await configs?.modMDXCode(inputPath, outputPath, currentPath, absHtmlPath, mdxCode);
+            }
+            
+            
+            // convert mdx code into html & paste into file
+            let parentDir = path.dirname(currentPath);
             let globalArgs = {
                 hostmdxCwd: parentDir,
                 hostmdxInputPath: inputPath,

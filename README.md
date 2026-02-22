@@ -27,13 +27,16 @@ You can add a file by the name `.hostmdxignore` at the root of your project to f
 You can also add a file by the name `host-mdx.js` at the root of your input folder as a config file with access to the following:
 
 ```js
+onHostStart(port)
+onHostEnd(port)
+toTriggerRecreate(event, path)
 onSiteCreateStart(inputPath, outputPath)
 onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
 onFileCreateStart(inputPath, outputPath, inFilePath, outFilePath)
 onFileCreateEnd(inputPath, outputPath, inFilePath, outFilePath, result)
-modBundleMDXSettings(inputPath, outputPath, settings)
+modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code)
 modGlobalArgs(inputPath, outputPath, globalArgs)
-toTriggerRecreate(event, path)
+modBundleMDXSettings(inputPath, outputPath, settings)
 ```
 
 > **Note:** Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
@@ -90,35 +93,43 @@ static/temp.jpg
 `host-mdx.js` file content:
 
 ```js
-export function onSiteCreateStart(inputPath, outputPath) {
-   console.log("onSiteCreateStart", inputPath, outputPath)
-}
-export function onSiteCreateEnd(inputPath, outputPath, wasSuccessful) {
-   console.log("onSiteCreateEnd", inputPath, outputPath, wasSuccessful)
-}
-export function onFileCreateStart(inputFilePath, outputFilePath) {
-   console.log("onFileCreateStart", inputFilePath, outputFilePath)
-}
-export function onFileCreateEnd(inputFilePath, outputFilePath) {
-   console.log("onFileCreateEnd", inputFilePath, outputFilePath)
-}
-export function onHostStart(port) {
+export async function onHostStart(port) {
    console.log("onHostStart", port)
 }
-export function onHostEnd(port) {
+export async function onHostEnd(port) {
    console.log("onHostEnd", port)
 }
-export function modBundleMDXSettings(inputPath, outputPath, settings) {
-   // Modify settings ...
-   return settings
-}
-export function toTriggerRecreate(event, path) {
+export async function toTriggerRecreate(event, path) {
    const isGOutputStream = /\.goutputstream-\w+$/.test(path);
    if (isGOutputStream) {
       return false;
    }
    
    return true;
+}
+export async function onSiteCreateStart(inputPath, outputPath) {
+   console.log("onSiteCreateStart", inputPath, outputPath)
+}
+export async function onSiteCreateEnd(inputPath, outputPath, wasSuccessful) {
+   console.log("onSiteCreateEnd", inputPath, outputPath, wasSuccessful)
+}
+export async function onFileCreateStart(inputFilePath, outputFilePath) {
+   console.log("onFileCreateStart", inputFilePath, outputFilePath)
+}
+export async function onFileCreateEnd(inputFilePath, outputFilePath) {
+   console.log("onFileCreateEnd", inputFilePath, outputFilePath)
+}
+export async function modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code){
+   // Modify code ...
+   return code;
+}
+export async function modGlobalArgs(inputPath, outputPath, globalArgs){
+   // Modify globalArgs ...
+   return globalArgs;
+}
+export async function modBundleMDXSettings(inputPath, outputPath, settings) {
+   // Modify settings ...
+   return settings
 }
 ```
 
