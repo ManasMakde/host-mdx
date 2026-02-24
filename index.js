@@ -118,7 +118,7 @@ function createFile(filePath, fileContent = "") {
     // Create file
     fs.writeFileSync(filePath, fileContent);
 }
-async function createSite(inputPath, outputPath, toBeVerbose) {
+async function createSite(inputPath, outputPath, toBeVerbose = false) {
     // Exit if already creating
     if (isCreatingSite) {
         log("Site creation already ongoing! Added to pending")
@@ -348,6 +348,10 @@ async function startServer(htmlDir, port) {  // Starts server at given port
 }
 export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OPTIONS) {
 
+    // Fill in for missing options
+    options = { ...DEFAULT_HOST_OPTIONS, ...options };
+
+
     // Create temp dir if no output path provided
     let outputPathProvided = outputPath !== "";
     if (!outputPathProvided) {
@@ -370,7 +374,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
 
 
     // Create site from mdx & return if only needed to create site
-    let wasCreated = await createSiteSafe(inputPath, outputPath);
+    let wasCreated = await createSiteSafe(inputPath, outputPath, options.toBeVerbose);
     if (options.toCreateOnly) {
         process.exitCode = !wasCreated ? 1 : 0;  // Exit with error code if not created successfully
         return;
@@ -378,7 +382,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
 
 
     // Watch for key presses
-    listenForKey(() => createSiteSafe(inputPath, outputPath));
+    listenForKey(() => createSiteSafe(inputPath, outputPath, options.toBeVerbose));
 
 
     // Watch for changes
@@ -389,7 +393,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
             }
 
             log(`Recreating site, Event: ${event}, Path: ${path}`, true)
-            createSiteSafe(inputPath, outputPath)
+            createSiteSafe(inputPath, outputPath, options.toBeVerbose)
         });
     }
 
