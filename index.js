@@ -14,8 +14,8 @@ import { mdxToHtml } from "./mdx-to-html.js";
 
 
 // To-Set Properties
-const DEFAULT_PORT = 3000;
-const MAX_PORT = 4000;
+export const DEFAULT_PORT = 3000;
+export const MAX_PORT = 4000;
 const APP_NAME = "host-mdx";
 const IGNORE_FILE_NAME = ".hostmdxignore";
 const CONFIG_FILE_NAME = "host-mdx.js";
@@ -405,7 +405,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
     // Handle quit
     const cleanup = () => {
         // Remove html path
-        if (!options.outputPathProvided && fs.existsSync(outputPath)) {
+        if (!outputPathProvided && fs.existsSync(outputPath)) {
             fs.rmSync(outputPath, { recursive: true, force: true })
         }
 

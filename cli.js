@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { log, host, createSiteSafe, createTempDir, getAvailablePort } from "./index.js";
+import { log, host, createSiteSafe, createTempDir, getAvailablePort, DEFAULT_PORT, MAX_PORT } from "./index.js";
 
 
 // Flags
