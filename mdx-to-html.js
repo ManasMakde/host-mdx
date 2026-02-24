@@ -1,10 +1,10 @@
 import * as Preact from "preact";
 import * as PreactDOM from "preact/compat";
-import * as _jsx_runtime from 'preact/jsx-runtime';
-import { renderToString } from 'preact-render-to-string';
-import { common } from 'lowlight';
-import { bundleMDX } from 'mdx-bundler';
-import { createRequire } from 'module';
+import * as _jsx_runtime from "preact/jsx-runtime";
+import { renderToStaticMarkup } from "preact-render-to-string";
+import { common } from "lowlight";
+import { bundleMDX } from "mdx-bundler";
+import { createRequire } from "module";
 import rehypeHighlight from "rehype-highlight";
 
 
@@ -12,16 +12,16 @@ import rehypeHighlight from "rehype-highlight";
 const nativeRequire = createRequire(import.meta.url);
 const jsxBundlerConfig = {
   jsxLib: {
-    varName: 'Preact',
-    package: 'preact',
+    varName: "Preact",
+    package: "preact",
   },
   jsxDom: {
-    varName: 'PreactDom',
-    package: 'preact/compat',
+    varName: "PreactDom",
+    package: "preact/compat",
   },
   jsxRuntime: {
-    varName: '_jsx_runtime',
-    package: 'preact/jsx-runtime',
+    varName: "_jsx_runtime",
+    package: "preact/jsx-runtime",
   },
 }
 
@@ -39,7 +39,7 @@ export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCa
     jsxConfig: jsxBundlerConfig,
     cwd: baseUrl,
     esbuildOptions: (options) => {
-      options.platform = 'node'
+      options.platform = "node"
       return options;
     },
     mdxOptions(options) {
@@ -65,7 +65,7 @@ export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCa
 
 
   return {
-    html: renderToString(Preact.h(Component, {})),
+    html: renderToStaticMarkup(Preact.h(Component, {})),
     exports: Exports
   }
 }
