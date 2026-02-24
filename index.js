@@ -254,6 +254,12 @@ async function createSite(inputPath, outputPath, toBeVerbose = false) {
         await createSite(inputPath, outputPath);
     }
 }
+async function setupConfigs(configFilePath) {
+    if (fs.existsSync(configFilePath)) {
+        log(`Importing config file ${CONFIG_FILE_NAME}`);
+        configs = await import(pathToFileURL(configFilePath).href);
+    }
+}
 export function createTempDir() {
     // Create default temp html dir
     fs.mkdirSync(TEMP_HTML_DIR, { recursive: true });
@@ -269,11 +275,19 @@ export function createTempDir() {
 
 
 // Main Methods
-export async function createSiteSafe(...args) {
+export async function createSiteSafe(inputPath, outputPath, toBeVerbose = false) {
 
+    // Setup config file if not already setup
+    if (configs === undefined) {
+        let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`)
+        await setupConfigs(configFilePath);
+    }
+
+
+    // Actual site creation
     let success = true;
     try {
-        await createSite(...args);
+        await createSite(inputPath, outputPath, toBeVerbose);
     }
     catch (err) {
         success = false;
@@ -367,10 +381,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
 
     // Get config
     let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`)
-    if (fs.existsSync(configFilePath)) {
-        log(`Importing config file ${CONFIG_FILE_NAME}`);
-        configs = await import(pathToFileURL(configFilePath).href);
-    }
+    await setupConfigs(configFilePath);
 
 
     // Create site from mdx & return if only needed to create site
