@@ -49,11 +49,18 @@ const LOG_TIME_OPTIONS = {
     hour12: false,
     fractionalSecondDigits: 3
 };
+const DEFAULT_CREATE_SITE_OPTIONS = {
+    toBeVerbose: false
+};
 const DEFAULT_HOST_OPTIONS = {
     port: undefined,
     toTrackChanges: false,
-    toBeVerbose: false
+    toBeVerbose: false,
+    createSiteOptions: DEFAULT_CREATE_SITE_OPTIONS
 };
+const DEFAULT_CHOKIDAR_OPTIONS = {
+    ignoreInitial: true
+}
 
 
 // Utility Methods
@@ -118,7 +125,7 @@ function createFile(filePath, fileContent = "") {
     // Create file
     fs.writeFileSync(filePath, fileContent);
 }
-async function createSite(inputPath, outputPath, toBeVerbose = false) {
+async function createSite(inputPath, outputPath, options) {
     // Exit if already creating
     if (isCreatingSite) {
         log("Site creation already ongoing! Added to pending")
@@ -174,7 +181,7 @@ async function createSite(inputPath, outputPath, toBeVerbose = false) {
 
         // Make dir
         if (isDir) {
-            log(`${currentPath} ---> ${absToOutput}`, !toBeVerbose)
+            log(`${currentPath} ---> ${absToOutput}`, !options.toBeVerbose)
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.mkdirSync(absToOutput, { recursive: true });
             await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
@@ -184,14 +191,14 @@ async function createSite(inputPath, outputPath, toBeVerbose = false) {
 
             // Broadcast file creation started
             let absHtmlPath = path.format({ ...path.parse(absToOutput), base: "", ext: ".html" })
-            log(`${currentPath} ---> ${absHtmlPath}`, !toBeVerbose)
+            log(`${currentPath} ---> ${absHtmlPath}`, !options.toBeVerbose)
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath)
 
 
             // Intercept mdx code
             let mdxCode = fs.readFileSync(currentPath, "utf8");
             if (typeof configs?.modMDXCode === "function") {
-                log(`Modifying mdx code of ${currentPath}`, !toBeVerbose);
+                log(`Modifying mdx code of ${currentPath}`, !options.toBeVerbose);
                 mdxCode = await configs?.modMDXCode(inputPath, outputPath, currentPath, absHtmlPath, mdxCode);
             }
 
@@ -214,7 +221,7 @@ async function createSite(inputPath, outputPath, toBeVerbose = false) {
         }
         // Copy paste file
         else if (!isDir) {
-            log(`${currentPath} ---> ${absToOutput}`, !toBeVerbose)
+            log(`${currentPath} ---> ${absToOutput}`, !options.toBeVerbose)
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput)
             fs.copyFileSync(currentPath, absToOutput)
             await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined)
@@ -251,7 +258,7 @@ async function createSite(inputPath, outputPath, toBeVerbose = false) {
 
     // Reinvoke creation
     if (isCreateSitePending) {
-        await createSite(inputPath, outputPath);
+        await createSite(inputPath, outputPath, options);
     }
 }
 async function setupConfigs(configFilePath) {
@@ -275,7 +282,11 @@ export function createTempDir() {
 
 
 // Main Methods
-export async function createSiteSafe(inputPath, outputPath, toBeVerbose = false) {
+export async function createSiteSafe(inputPath, outputPath, options = DEFAULT_CREATE_SITE_OPTIONS) {
+
+    // Fill in for missing options
+    options = { ...DEFAULT_CREATE_SITE_OPTIONS, ...options };
+
 
     // Setup config file if not already setup
     if (configs === undefined) {
@@ -287,7 +298,7 @@ export async function createSiteSafe(inputPath, outputPath, toBeVerbose = false)
     // Actual site creation
     let success = true;
     try {
-        await createSite(inputPath, outputPath, toBeVerbose);
+        await createSite(inputPath, outputPath, options);
     }
     catch (err) {
         success = false;
@@ -314,10 +325,9 @@ async function listenForKey(createSiteCallback) {
         }
     });
 }
-async function watchForChanges(pathTowatch, callback) {
-    chokidar.watch(pathTowatch, {
-        ignoreInitial: true
-    }).on("all", callback);
+async function watchForChanges(pathTowatch, options, callback) {
+    options = { ...DEFAULT_CHOKIDAR_OPTIONS, ...options };
+    chokidar.watch(pathTowatch, options).on("all", callback);
 }
 async function startServer(htmlDir, port) {  // Starts server at given port
 
@@ -385,7 +395,7 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
 
 
     // Create site from mdx & return if only needed to create site
-    let wasCreated = await createSiteSafe(inputPath, outputPath, options.toBeVerbose);
+    let wasCreated = await createSiteSafe(inputPath, outputPath, options.createSiteOptions);
     if (options.toCreateOnly) {
         process.exitCode = !wasCreated ? 1 : 0;  // Exit with error code if not created successfully
         return;
@@ -393,18 +403,18 @@ export async function host(inputPath, outputPath = "", options = DEFAULT_HOST_OP
 
 
     // Watch for key presses
-    listenForKey(() => createSiteSafe(inputPath, outputPath, options.toBeVerbose));
+    listenForKey(() => createSiteSafe(inputPath, outputPath, options.createSiteOptions));
 
 
     // Watch for changes
     if (options.toTrackChanges) {
-        watchForChanges(inputPath, async (event, path) => {
+        watchForChanges(inputPath, configs?.chokidarOptions ?? {}, async (event, path) => {
             if (typeof configs?.toTriggerRecreate === 'function' && !(await configs?.toTriggerRecreate(event, path))) {
                 return;
             }
 
-            log(`Recreating site, Event: ${event}, Path: ${path}`, true)
-            createSiteSafe(inputPath, outputPath, options.toBeVerbose)
+            log(`Recreating site, Event: ${event}, Path: ${path}`, !options.toBeVerbose)
+            createSiteSafe(inputPath, outputPath, options.createSiteOptions)
         });
     }
 

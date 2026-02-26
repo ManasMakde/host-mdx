@@ -103,8 +103,11 @@ async function hostOptionsFromArgs(rawArgs) {
     // Assign tracking changes
     let toTrackChanges = rawArgs.includes(TRACK_CHANGES_FLAG) || rawArgs.includes(TRACK_CHANGES_SHORT_FLAG);
 
+    // Assign create site options
+    let createSiteOptions = { toBeVerbose };
 
-    return { inputPath, outputPath, port, toBeVerbose, toTrackChanges };
+
+    return { inputPath, outputPath, port, toBeVerbose, toTrackChanges, createSiteOptions };
 }
 function isSubPath(potentialParent, thePath) {
     // For inside-directory checking, we want to allow trailing slashes, so normalize.
@@ -128,7 +131,7 @@ function isSubPath(potentialParent, thePath) {
 
 
 // Main Methods
-export async function Main() {
+export async function main() {
 
     // Get all arguments
     const rawArgs = process.argv.slice(2);
@@ -139,10 +142,6 @@ export async function Main() {
         console.log(HELP_MESSAGE)
         return;
     }
-
-
-    // Check if to be verbose
-    let toBeVerbose = rawArgs.includes(VERBOSE_FLAG) || rawArgs.includes(VERBOSE_SHORT_FLAG);
 
 
     // Get host options from arguments & return if invalid
@@ -157,7 +156,7 @@ export async function Main() {
     if (toCreateOnly) {
         let outputPathProvided = hostOptions.outputPath !== "";
         let outputPath = outputPathProvided ? hostOptions.outputPath : createTempDir();
-        await createSiteSafe(hostOptions.inputPath, outputPath, toBeVerbose);
+        await createSiteSafe(hostOptions.inputPath, outputPath, hostOptions.createSiteOptions);
         return;
     }
 
@@ -167,4 +166,4 @@ export async function Main() {
 }
 
 
-Main()
+main()

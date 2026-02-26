@@ -37,6 +37,7 @@ onFileCreateEnd(inputPath, outputPath, inFilePath, outFilePath, result)
 modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code)
 modGlobalArgs(inputPath, outputPath, globalArgs)
 modBundleMDXSettings(inputPath, outputPath, settings)
+chokidarOptions = {}
 ```
 
 > **Note:** Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
@@ -130,6 +131,11 @@ export async function modGlobalArgs(inputPath, outputPath, globalArgs){
 export async function modBundleMDXSettings(inputPath, outputPath, settings) {
    // Modify settings ...
    return settings
+}
+
+export const chokidarOptions = {
+   awaitWriteFinish: true,
+   ignored: (file) => file.endsWith('.txt')
 }
 ```
 
