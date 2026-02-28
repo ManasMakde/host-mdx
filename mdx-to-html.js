@@ -23,7 +23,7 @@ const jsxBundlerConfig = {
     varName: "_jsx_runtime",
     package: "preact/jsx-runtime",
   },
-}
+};
 
 
 // Methods
@@ -54,7 +54,7 @@ export async function mdxToHtml(mdxCode, baseUrl, globalArgs = {}, modSettingsCa
 
   // Modify settings
   if (modSettingsCallback !== undefined) {
-    settings = await modSettingsCallback(settings)
+    settings = await modSettingsCallback(settings);
   }
 
 

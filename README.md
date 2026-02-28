@@ -27,16 +27,18 @@ You can add a file by the name `.hostmdxignore` at the root of your project to f
 You can also add a file by the name `host-mdx.js` at the root of your input folder as a config file with access to the following:
 
 ```js
-onHostStart(port)
-onHostEnd(port)
-toTriggerRecreate(event, path)
+onHostStarting(inputPath, outputPath, port)
+onHostStarted(inputPath, outputPath, port)
+onHostEnded(inputPath, outputPath, port)
 onSiteCreateStart(inputPath, outputPath)
 onSiteCreateEnd(inputPath, outputPath, wasInterrupted)
 onFileCreateStart(inputPath, outputPath, inFilePath, outFilePath)
 onFileCreateEnd(inputPath, outputPath, inFilePath, outFilePath, result)
+toIgnore(inputPath, outputPath, path)
 modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code)
 modGlobalArgs(inputPath, outputPath, globalArgs)
 modBundleMDXSettings(inputPath, outputPath, settings)
+modRebuildPaths(inputPath, outputPath, rebuildPaths)
 chokidarOptions = {}
 ```
 
@@ -94,19 +96,14 @@ static/temp.jpg
 `host-mdx.js` file content:
 
 ```js
-export async function onHostStart(port) {
-   console.log("onHostStart", port)
+export async function onHostStarting(inputPath, outputPath, port) {
+   console.log("onHostStarting", port)
 }
-export async function onHostEnd(port) {
-   console.log("onHostEnd", port)
+export async function onHostStarted(inputPath, outputPath, port) {
+   console.log("onHostStarted", port)
 }
-export async function toTriggerRecreate(event, path) {
-   const isGOutputStream = /\.goutputstream-\w+$/.test(path);
-   if (isGOutputStream) {
-      return false;
-   }
-   
-   return true;
+export async function onHostEnded(inputPath, outputPath, port) {
+   console.log("onHostEnded", port)
 }
 export async function onSiteCreateStart(inputPath, outputPath) {
    console.log("onSiteCreateStart", inputPath, outputPath)
@@ -120,6 +117,14 @@ export async function onFileCreateStart(inputFilePath, outputFilePath) {
 export async function onFileCreateEnd(inputFilePath, outputFilePath) {
    console.log("onFileCreateEnd", inputFilePath, outputFilePath)
 }
+export async function toIgnore(inputPath, outputPath, path) {
+   const isGOutputStream = /\.goutputstream-\w+$/.test(path);
+   if (isGOutputStream) {
+      return true;
+   }
+   
+   return false;
+}
 export async function modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code){
    // Modify code ...
    return code;
@@ -132,10 +137,12 @@ export async function modBundleMDXSettings(inputPath, outputPath, settings) {
    // Modify settings ...
    return settings
 }
-
+export async function modRebuildPaths(inputPath, outputPath, rebuildPaths) {
+   // Modify rebuildPaths ...
+   return rebuildPaths;
+}
 export const chokidarOptions = {
-   awaitWriteFinish: true,
-   ignored: (file) => file.endsWith('.txt')
+   awaitWriteFinish: true
 }
 ```
 
