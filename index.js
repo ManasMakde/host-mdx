@@ -84,14 +84,6 @@ function crawlDir(dir) {
     let entries = fs.readdirSync(absDir, { recursive: true });
     return entries.map(file => path.join(absDir, file));
 }
-async function setupConfigs(configFilePath) {
-    if (fs.existsSync(configFilePath)) {
-        let cleanConfigFilePath = pathToFileURL(configFilePath).href
-        return await import(cleanConfigFilePath);
-    }
-
-    return {};
-}
 async function startServer(hostDir, port, errorCallback) {  // Starts server at given port
 
     // Make sure host dir path is absolute
@@ -176,6 +168,16 @@ export function isPathInside(parentPath, childPath) {
         !relation.startsWith(`..${path.sep}`) &&
         relation !== path.resolve(childPath)
     );
+}
+export async function setupConfigs(inputPath) {
+
+    let configFilePath = path.join(inputPath, CONFIG_FILE_NAME);
+    if (fs.existsSync(configFilePath)) {
+        let cleanConfigFilePath = pathToFileURL(configFilePath).href
+        return await import(cleanConfigFilePath);
+    }
+
+    return {};
 }
 export function createTempDir() {
     // Create default temp html dir
@@ -271,7 +273,7 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
         let configFilePath = path.join(inputPath, `./${CONFIG_FILE_NAME}`);
         let doesConfigFileExists = fs.existsSync(configFilePath);
         log(`Importing config file ${configFilePath}`, !doesConfigFileExists);
-        configs = await setupConfigs(configFilePath);
+        configs = await setupConfigs(inputPath);
     }
 
 
@@ -481,7 +483,7 @@ export class HostMdx {
         let configFilePath = path.join(this.inputPath, `./${CONFIG_FILE_NAME}`);
         let doesConfigFileExists = fs.existsSync(configFilePath);
         log(`Importing config file ${configFilePath}`, !doesConfigFileExists);
-        this.configs = { ...(await setupConfigs(configFilePath)), ...this.configs };
+        this.configs = { ...(await setupConfigs(this.inputPath)), ...this.configs };
 
 
         // Get port

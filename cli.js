@@ -2,7 +2,7 @@
 
 import path from "path";
 import * as readline from "readline";
-import { HostMdx, createSite, TrackChanges, log } from "./index.js";
+import { HostMdx, createSite, TrackChanges, setupConfigs, log } from "./index.js";
 
 
 // Flags
@@ -132,7 +132,8 @@ export async function main() {
     let toCreateOnly = rawArgs.includes(CREATE_FLAG) || rawArgs.includes(CREATE_SHORT_FLAG);
     if (toCreateOnly) {
         try {
-            await createSite(inputPath, outputPath, null, undefined, { toBeVerbose });
+            let configs = await setupConfigs(inputPath);
+            await createSite(inputPath, outputPath, null, undefined, { ...configs, toBeVerbose });
         }
         catch (err) {
             process.exitCode = 1;  // Exit with error code if not created successfully
