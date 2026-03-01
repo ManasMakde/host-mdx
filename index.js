@@ -218,22 +218,32 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
     outputPath = outputPath !== "" ? outputPath : createTempDir();
 
 
-    // Check for verbose
-    const toBeVerbose = configs?.toBeVerbose === true;
+    // Get input path
+    if (!fs.existsSync(inputPath) || !fs.lstatSync(inputPath)?.isDirectory()) {
+        throw new Error(`Invalid input path "${inputPath}"`);
+    }
+
+
+    // Get output path exists & is a directory
+    if (!fs.existsSync(outputPath) || !fs.lstatSync(outputPath).isDirectory()) {
+        throw new Error(`Invalid output path "${outputPath}"`);
+    }
 
 
     // Check if `outputPath` is inside `inputPath` (causing infinite loop)
     if (isPathInside(inputPath, outputPath)) {
-        log(`Output path "${outputPath}" cannot be inside or same as input path "${inputPath}"`);
-        return;
+        throw new Error(`Output path "${outputPath}" cannot be inside or same as input path "${inputPath}"`);
     }
 
 
     // Check if `inputPath` is inside `outputPath` (causing code wipeout)
     if (isPathInside(outputPath, inputPath)) {
-        log(`Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`);
-        return;
+        throw `Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`;
     }
+
+
+    // Check for verbose
+    const toBeVerbose = configs?.toBeVerbose === true;
 
 
     // Check `interruptCondition` provided
@@ -465,34 +475,6 @@ export class HostMdx {
         this.#outputPathProvided = this.outputPath !== "";
         this.inputPath = this.#inputPathProvided ? this.inputPath : process.cwd();
         this.outputPath = this.#outputPathProvided ? this.outputPath : createTempDir();
-
-
-        // Get input path
-        if (!fs.existsSync(this.inputPath) || !fs.lstatSync(this.inputPath)?.isDirectory()) {
-            log(`Invalid input path "${this.inputPath}"`);
-            return false;
-        }
-
-
-        // Get output path exists & is a directory
-        if (!fs.existsSync(this.outputPath) || !fs.lstatSync(this.outputPath).isDirectory()) {
-            log(`Invalid output path "${this.outputPath}"`);
-            return false;
-        }
-
-
-        // Check if output path is inside input path (causing infinite loop)
-        if (isPathInside(this.inputPath, this.outputPath)) {
-            log(`Output path "${this.outputPath}" cannot be inside or same as input path "${this.inputPath}"`);
-            return false;
-        }
-
-
-        // Check if input path is inside output path (causing code wipeout)
-        if (isPathInside(this.outputPath, this.inputPath)) {
-            log(`Input path "${this.inputPath}" cannot be inside or same as output path "${this.outputPath}"`);
-            return false;
-        }
 
 
         // Get configs

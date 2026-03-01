@@ -136,7 +136,7 @@ export async function main() {
         }
         catch (err) {
             process.exitCode = 1;  // Exit with error code if not created successfully
-            log(`${err}\n${err?.stack}`);
+            log(`Failed to create site!\n${err?.stack}`);
         }
 
         return;
