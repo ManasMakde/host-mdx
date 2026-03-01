@@ -5,8 +5,10 @@ import path from "path";
 import sirv from "sirv";
 import polka from "polka";
 import ignore from "ignore";
+import pLimit from 'p-limit';
 import chokidar from "chokidar";
 import { pathToFileURL } from "url";
+import { promises as fsp } from "fs";
 import { mdxToHtml } from "./mdx-to-html.js";
 
 
@@ -72,17 +74,10 @@ function getIgnore(ignoreFilePath) {
 
     return ig;
 }
-function createFile(filePath, fileContent = "") {
-
-    // Check if path for file exists
+async function createFile(filePath, fileContent = "") {
     let fileLocation = path.dirname(filePath)
-    if (!fs.existsSync(fileLocation)) {
-        fs.mkdirSync(fileLocation, { recursive: true });
-    }
-
-
-    // Create file
-    fs.writeFileSync(filePath, fileContent);
+    await fsp.mkdir(fileLocation, { recursive: true });
+    await fsp.writeFile(filePath, fileContent);
 }
 function crawlDir(dir) {
     const absDir = path.resolve(dir);
@@ -106,17 +101,17 @@ async function startServer(hostDir, port, errorCallback) {  // Starts server at 
     // Start Server
     const assets = sirv(hostDir, { dev: true });
     const newApp = polka({
-        onNoMatch: (req, res) => {
-            // Set status code to 404
-            res.statusCode = 404;
-
-
-            // Send 404 file if found else not found message
+        onNoMatch: (req, res) => {  // Send 404 file if found else not found message
             const errorFile = path.join(hostDir, FILE_404);
             if (fs.existsSync(errorFile)) {
-                res.setHeader("Content-Type", "text/html");
-                res.end(fs.readFileSync(errorFile));
+                const content = fs.readFileSync(errorFile);
+                res.writeHead(404, {
+                    'Content-Type': 'text/html',
+                    'Content-Length': content.length
+                });
+                res.end(content);
             } else {
+                res.statusCode = 404;
                 res.end(NOT_FOUND_404_MESSAGE);
             }
         }
@@ -161,6 +156,27 @@ export function log(msg, toSkip = false) {
     let timestamp = new Date().toLocaleString(undefined, LOG_TIME_OPTIONS)
     console.log(`[${APP_NAME} ${timestamp}] ${msg}`)
 }
+export function isPathInside(parentPath, childPath) {
+
+    // Make sure both are absolute paths
+    parentPath = parentPath !== "" ? path.resolve(parentPath) : "";
+    childPath = childPath !== "" ? path.resolve(childPath) : "";
+
+
+    // Check if parent & child are same
+    if (parentPath === childPath) {
+        return true;
+    }
+
+
+    const relation = path.relative(parentPath, childPath);
+    return Boolean(
+        relation &&
+        relation !== '..' &&
+        !relation.startsWith(`..${path.sep}`) &&
+        relation !== path.resolve(childPath)
+    );
+}
 export function createTempDir() {
     // Create default temp html dir
     fs.mkdirSync(TEMP_HTML_DIR, { recursive: true });
@@ -192,10 +208,43 @@ export async function getAvailablePort(startPort = DEFAULT_PORT, maxPort = MAX_P
 
     return -1;
 }
-export async function createSite(inputPath, outputPath, pathsToCreate = [], ignores = undefined, configs = undefined, interruptCondition = async () => false) {
+export async function createSite(inputPath = "", outputPath = "", pathsToCreate = [], ignores = undefined, configs = undefined, interruptCondition = undefined) {
 
-    // Get all paths from `inputPath` if null `pathsToCreate` provided
+    // Check `inputPath`
+    inputPath = inputPath !== "" ? inputPath : process.cwd();
+
+
+    // Check `outputPath`
+    outputPath = outputPath !== "" ? outputPath : createTempDir();
+
+
+    // Check for verbose
+    const toBeVerbose = configs?.toBeVerbose === true;
+
+
+    // Check if `outputPath` is inside `inputPath` (causing infinite loop)
+    if (isPathInside(inputPath, outputPath)) {
+        log(`Output path "${outputPath}" cannot be inside or same as input path "${inputPath}"`);
+        return;
+    }
+
+
+    // Check if `inputPath` is inside `outputPath` (causing code wipeout)
+    if (isPathInside(outputPath, inputPath)) {
+        log(`Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`);
+        return;
+    }
+
+
+    // Check `interruptCondition` provided
+    if (typeof interruptCondition !== 'function') {
+        interruptCondition = async () => false;
+    }
+
+
+    // Hard reload, clear output path & Get all paths from `inputPath`
     if (pathsToCreate == null) {
+        emptyDir(outputPath)
         pathsToCreate = crawlDir(inputPath);
     }
 
@@ -216,8 +265,14 @@ export async function createSite(inputPath, outputPath, pathsToCreate = [], igno
     }
 
 
+    // Setup concurrency limit
+    const concurrency = configs?.concurrency ?? 1;
+    log(`Setting concurrency to ${concurrency}`, !toBeVerbose);
+    const limit = pLimit(concurrency);
+
+
     // Filter out paths based on ignore
-    const filterResults = await Promise.all(pathsToCreate.map(async (currentPath) => {
+    const filterResults = await Promise.all(pathsToCreate.map(async (currentPath) => limit(async () => {
         // Filter out input path itself if passed
         if (inputPath === currentPath) {
             return false;
@@ -238,13 +293,13 @@ export async function createSite(inputPath, outputPath, pathsToCreate = [], igno
         }
 
         return true;
-    }));
+    })));
     pathsToCreate = pathsToCreate.filter((_, index) => filterResults[index]);
 
 
     // Return if no paths remaining to create after filtering for ignores
     if (pathsToCreate.length === 0) {
-        log(`Skipping site creation since no paths to create`, !configs?.toBeVerbose);
+        log(`Skipping site creation since no paths to create`, !toBeVerbose);
         return;
     }
 
@@ -260,51 +315,48 @@ export async function createSite(inputPath, outputPath, pathsToCreate = [], igno
 
     // Iterate through all folders & files
     let wasInterrupted = false;
-    let i = 0;
-    while (i < pathsToCreate.length) {
+    await Promise.all(pathsToCreate.map((currentPath) => limit(async () => {
 
-        // Break all if interrupted
-        let currentPath = pathsToCreate[i++];
-        wasInterrupted = await interruptCondition(inputPath, outputPath, currentPath);
+        // Check for interruption & return
+        wasInterrupted = wasInterrupted || await interruptCondition(inputPath, outputPath, currentPath);
         if (wasInterrupted) {
-            break;
+            return;
         }
+
+
+        // Essentials
+        const pathExists = fs.existsSync(currentPath);
+        const relToInput = path.relative(inputPath, currentPath);
+        const absToOutput = path.join(outputPath, relToInput);
+        const isDir = pathExists ? fs.statSync(currentPath).isDirectory() : false;
+        const isMdx = currentPath.endsWith(".mdx");
+        const absHtmlPath = isMdx ? path.format({ ...path.parse(absToOutput), base: "", ext: ".html" }) : "";
 
 
         // Delete if path does not exist
-        const relToInput = path.relative(inputPath, currentPath);
-        const absToOutput = path.join(outputPath, relToInput);
-        if (!fs.existsSync(currentPath)) {
-            log(`Deleting ${absToOutput}`, !configs?.toBeVerbose);
-            fs.rmSync(absToOutput, { recursive: true });
-            continue;
+        if (!pathExists) {
+            let pathToDelete = isMdx ? absHtmlPath : absToOutput;
+            log(`Deleting ${pathToDelete}`, !toBeVerbose);
+            await fsp.rm(pathToDelete, { recursive: true, force: true });
         }
-
-
-        // Get essentials
-        const isDir = fs.statSync(currentPath).isDirectory();
-        const isMdx = !isDir && currentPath.endsWith(".mdx");
-
-
         // Make corresponding directory
-        if (isDir) {
-            log(`Creating ${currentPath} ---> ${absToOutput}`, !configs?.toBeVerbose);
+        else if (isDir) {
+            log(`Creating ${currentPath} ---> ${absToOutput}`, !toBeVerbose);
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput);
-            fs.mkdirSync(absToOutput, { recursive: true });
+            await fsp.mkdir(absToOutput, { recursive: true });
             await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined);
         }
         // Make html file from mdx
-        else if (!isDir && isMdx) {
+        else if (isMdx) {
 
             // Broadcast file creation started
-            let absHtmlPath = path.format({ ...path.parse(absToOutput), base: "", ext: ".html" });
-            log(`Creating ${currentPath} ---> ${absHtmlPath}`, !configs?.toBeVerbose);
+            log(`Creating ${currentPath} ---> ${absHtmlPath}`, !toBeVerbose);
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath);
 
 
             // Intercept mdx code
-            let mdxCode = fs.readFileSync(currentPath, "utf8");
-            log(`Modifying mdx code of ${currentPath}`, !configs?.toBeVerbose || !configs?.modMDXCode);
+            let mdxCode = await fsp.readFile(currentPath, "utf8");
+            log(`Modifying mdx code of ${currentPath}`, !toBeVerbose || !configs?.modMDXCode);
             mdxCode = await configs?.modMDXCode?.(inputPath, outputPath, currentPath, absHtmlPath, mdxCode) ?? mdxCode;
 
 
@@ -314,20 +366,21 @@ export async function createSite(inputPath, outputPath, pathsToCreate = [], igno
             globalArgs = await configs?.modGlobalArgs?.(inputPath, outputPath, globalArgs) ?? globalArgs;
             let result = await mdxToHtml(mdxCode, parentDir, globalArgs, async (settings) => { return await configs?.modBundleMDXSettings?.(inputPath, outputPath, settings) ?? settings });
             let htmlCode = result.html;
-            createFile(absHtmlPath, `<!DOCTYPE html>${htmlCode}`);
+            await createFile(absHtmlPath, `<!DOCTYPE html>${htmlCode}`);
 
 
             // Broadcast file creation ended
             await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absHtmlPath, result);
         }
         // Copy paste file
-        else if (!isDir) {
+        else {
             log(`Creating ${currentPath} ---> ${absToOutput}`, !configs.toBeVerbose);
             await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput);
-            fs.copyFileSync(currentPath, absToOutput);
+            await fsp.mkdir(path.dirname(absToOutput), { recursive: true });
+            await fsp.copyFile(currentPath, absToOutput);
             await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined);
         }
-    }
+    })));
 
 
     // Broadcast site creation ended
@@ -340,36 +393,55 @@ export async function createSite(inputPath, outputPath, pathsToCreate = [], igno
 export class HostMdx {
 
     // Private Properties
-    #inputPathProvided = false;
-    #outputPathProvided = false;
+    #inputPathProvided = true;
+    #outputPathProvided = true;
     #siteCreationStatus = SiteCreationStatus.NONE;
     #pendingHardSiteCreation = false;
     #alteredPaths = [];
+    #app = null;
+    #watcher = null;
+    #ignores = null;
 
 
     // Constructors
     constructor(inputPath = "", outputPath = "", configs = {}) {
-        this.#inputPathProvided = inputPath !== "";
-        this.#outputPathProvided = outputPath !== "";
-        this.inputPath = this.#inputPathProvided ? inputPath : process.cwd();
-        this.outputPath = this.#outputPathProvided ? outputPath : createTempDir();
-        this.app = null;
-        this.watcher = null;
-        this.ignores = null;
+        this.inputPath = inputPath;
+        this.outputPath = outputPath;
         this.configs = configs;
     }
 
 
     // Private Methods
-    async #watchForChanges(event, path) {
+    async #watchForChanges(event, somePath) {
+
+        // Return if out input path itself if passed
+        if (this.inputPath === somePath) {
+            return;
+        }
+
+
+        // Return if matches .ignore file
+        const relToInput = path.relative(this.inputPath, somePath);
+        if (this.#ignores.ignores(relToInput)) {
+            return;
+        }
+
+
+        // Return if toIgnore() from configs
+        const toIgnore = await this.configs?.toIgnore?.(this.inputPath, this.outputPath, somePath);
+        if (toIgnore) {
+            return;
+        }
+
+
         // Add changed path
-        this.#alteredPaths.push(path);
+        this.#alteredPaths.push(somePath);
 
 
         // Reflect changes immediately
         if (this.configs?.trackChanges !== undefined && this.configs?.trackChanges != TrackChanges.NONE) {
             let toHardReload = this.configs?.trackChanges == TrackChanges.HARD;
-            log(`${toHardReload ? "Hard recreating" : "Recreating"} site, Event: ${event}, Path: ${path}`, !this.configs?.toBeVerbose);
+            log(`${toHardReload ? "Hard recreating" : "Recreating"} site, Event: ${event}, Path: ${somePath}`, !this.configs?.toBeVerbose);
             await this.recreateSite(toHardReload);
         }
     }
@@ -388,8 +460,39 @@ export class HostMdx {
         await this.stop();
 
 
-        // Get port
-        let port = this.configs?.port == undefined ? await getAvailablePort() : this.configs?.port;
+        // Asssign all
+        this.#inputPathProvided = this.inputPath !== "";
+        this.#outputPathProvided = this.outputPath !== "";
+        this.inputPath = this.#inputPathProvided ? this.inputPath : process.cwd();
+        this.outputPath = this.#outputPathProvided ? this.outputPath : createTempDir();
+
+
+        // Get input path
+        if (!fs.existsSync(this.inputPath) || !fs.lstatSync(this.inputPath)?.isDirectory()) {
+            log(`Invalid input path "${this.inputPath}"`);
+            return false;
+        }
+
+
+        // Get output path exists & is a directory
+        if (!fs.existsSync(this.outputPath) || !fs.lstatSync(this.outputPath).isDirectory()) {
+            log(`Invalid output path "${this.outputPath}"`);
+            return false;
+        }
+
+
+        // Check if output path is inside input path (causing infinite loop)
+        if (isPathInside(this.inputPath, this.outputPath)) {
+            log(`Output path "${this.outputPath}" cannot be inside or same as input path "${this.inputPath}"`);
+            return false;
+        }
+
+
+        // Check if input path is inside output path (causing code wipeout)
+        if (isPathInside(this.outputPath, this.inputPath)) {
+            log(`Input path "${this.inputPath}" cannot be inside or same as output path "${this.outputPath}"`);
+            return false;
+        }
 
 
         // Get configs
@@ -399,9 +502,21 @@ export class HostMdx {
         this.configs = { ...(await setupConfigs(configFilePath)), ...this.configs };
 
 
+        // Get port
+        let port = this.configs?.port ?? await getAvailablePort();
+        if (port === -1) {
+            log(`Could not find any available ports`);
+            return false;
+        }
+        else if (!Number.isInteger(port)) {
+            log(`Invalid port`)
+            return false;
+        }
+
+
         // Get ignores
         let ignoreFilePath = path.join(this.inputPath, IGNORE_FILE_NAME);
-        this.ignores = getIgnore(ignoreFilePath);
+        this.#ignores = getIgnore(ignoreFilePath);
 
 
         // Broadcast hosting about to start
@@ -410,17 +525,16 @@ export class HostMdx {
 
         // Watch for changes
         let chokidarOptions = { ...DEFAULT_CHOKIDAR_OPTIONS, ...(this.configs?.chokidarOptions ?? {}) };
-        this.watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, path) => this.#watchForChanges(event, path));
+        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, path) => this.#watchForChanges(event, path));
 
 
         // Delete old files & Create site
-        emptyDir(this.outputPath);
         await this.recreateSite(true);
 
 
         // Start server to host site
-        this.app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); throw e; });
-        this.app?.server?.on("close", async () => { await this.configs?.onHostEnded?.(port); });
+        this.#app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); throw e; });
+        this.#app?.server?.on("close", async () => { await this.configs?.onHostEnded?.(this.inputPath, this.outputPath, port); });
 
 
         // Broadcast hosting started
@@ -429,6 +543,9 @@ export class HostMdx {
 
         // Load as started
         log(`Server listening at ${port} ...`);
+
+
+        return true;
     }
     async recreateSite(hardReload = false) {
 
@@ -456,7 +573,7 @@ export class HostMdx {
         try {
             let pathsToCreate = hardReload ? null : [...this.#alteredPaths];
             this.#alteredPaths = [];
-            await createSite(this.inputPath, this.outputPath, pathsToCreate, this.ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
+            await createSite(this.inputPath, this.outputPath, pathsToCreate, this.#ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
         }
         catch (err) {
             log(`Failed to create site!\n${err.stack}`);
@@ -476,15 +593,15 @@ export class HostMdx {
     async stop() {
         // Remove temp dir html path
         if (!this.#outputPathProvided && fs.existsSync(this.outputPath)) {
-            fs.rmSync(this.outputPath, { recursive: true, force: true });
+            fs.rmSync(this.outputPath, { recursive: true });
         }
 
 
         // Stop server       
-        this.app?.server?.closeAllConnections?.(); //(e) => { process.exit(); });
+        this.#app?.server?.close?.(); //(e) => { process.exit(); });
 
 
         // Stop watching for changes
-        this.watcher?.close?.();
+        await this.#watcher?.close?.();
     }
 }

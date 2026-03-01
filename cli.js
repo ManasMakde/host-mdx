@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import fs from "fs";
 import path from "path";
 import * as readline from "readline";
-import { HostMdx, createSite, createTempDir, emptyDir, getAvailablePort, TrackChanges, log } from "./index.js";
+import { HostMdx, createSite, TrackChanges, log } from "./index.js";
 
 
 // Flags
+const CONCURRENCY_FLAG = "--concurrency"
 const CREATE_FLAG = "--create-only";
 const CREATE_SHORT_FLAG = "-c";
 const HELP_FLAG = "--help";
@@ -20,95 +20,70 @@ const VERBOSE_FLAG = "--verbose";
 const VERBOSE_SHORT_FLAG = "-v";
 
 
-// Messages & Errors
+// Properties
+const SOFT_RELOAD_ARG = "soft"
+const HARD_RELOAD_ARG = "hard"
 const HELP_MESSAGE = `Usage: host-mdx [options]
 
 Options:
-${CREATE_FLAG}, ${CREATE_SHORT_FLAG}     Only create the html website from mdx does not host
-${HELP_FLAG}, ${HELP_SHORT_FLAG}            Shows all available options
-${INPUT_PATH_FLAG}=...      The path at which all mdx files are stored
-${OUTPUT_PATH_FLAG}=...     The path to which all html files will be generated
-${PORT_FLAG}=...            Localhost port number on which to host 
-${TRACK_CHANGES_FLAG}, ${TRACK_CHANGES_SHORT_FLAG}   Tracks any changes & auto reloads, -t=hard for hard reload
-${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}         Shows additional log messages
+${CONCURRENCY_FLAG}=<num>       Limit number of files to concurrently process (Optional, default: 1)
+${CREATE_FLAG}, ${CREATE_SHORT_FLAG}         Only creates the html website from mdx does not host
+${HELP_FLAG}, ${HELP_SHORT_FLAG}                Shows all available options
+${INPUT_PATH_FLAG}=<path>       The path at which all mdx files are stored
+${OUTPUT_PATH_FLAG}=<path>      The path to which all html files will be generated
+${PORT_FLAG}=<num>              Localhost port number on which to host 
+${TRACK_CHANGES_FLAG}, ${TRACK_CHANGES_SHORT_FLAG}       Tracks any changes & auto reloads, ${TRACK_CHANGES_SHORT_FLAG}=${HARD_RELOAD_ARG} for hard reload
+${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}             Shows additional log messages
 `;
 
 
 // Utility Methods
-function isPathInside(parentPath, childPath) {
-
-    // Make sure both are absolute paths
-    parentPath = parentPath !== "" ? path.resolve(parentPath) : "";
-    childPath = childPath !== "" ? path.resolve(childPath) : "";
-
-
-    // Check if parent & child are same
-    if (parentPath === childPath) {
-        return true;
-    }
-
-
-    const relation = path.relative(parentPath, childPath);
-    return Boolean(
-        relation &&
-        relation !== '..' &&
-        !relation.startsWith(`..${path.sep}`) &&
-        relation !== path.resolve(childPath)
-    );
-}
 function getInputPathFromArgs(rawArgs) {
-    // Assign input path
     let inputPath = rawArgs.find(val => val.startsWith(INPUT_PATH_FLAG));
     let inputPathProvided = inputPath !== undefined;
-    inputPath = inputPathProvided ? inputPath.split('=')?.[1] : undefined;
-    inputPath = inputPath ?? process.cwd();
-
-
-    // Check input path exists & is a directory
-    if (!fs.existsSync(inputPath) || !fs.lstatSync(inputPath).isDirectory()) {
-        return null;
-    }
-
-
+    inputPath = inputPathProvided ? inputPath.split('=')?.[1] : "";
     return inputPath !== "" ? path.resolve(inputPath) : inputPath;  // To ensure input path is absolute
 }
 function getOutputPathFromArgs(rawArgs) {
-
-    // Assign output path
     let outputPath = rawArgs.find(val => val.startsWith(OUTPUT_PATH_FLAG));
     let outputPathProvided = outputPath !== undefined;
-    outputPath = outputPathProvided ? outputPath.split('=')?.[1] : undefined;
-    outputPath = outputPath ?? createTempDir();
-
-
-    // Check output path exists & is a directory
-    if (!fs.existsSync(outputPath) || !fs.lstatSync(outputPath).isDirectory()) {
-        return null;
-    }
-
-
+    outputPath = outputPathProvided ? outputPath.split('=')?.[1] : "";
     return outputPath !== "" ? path.resolve(outputPath) : outputPath;  // To ensure input path is absolute
 }
-async function getPortFromArgs(rawArgs) {
+function getPortFromArgs(rawArgs) {
     let port = rawArgs.find(val => val.startsWith(PORT_FLAG));
     let portProvided = port !== undefined;
-    return portProvided ? Number(port.split('=')[1]) : (await getAvailablePort());
+    return portProvided ? Number(port.split('=')[1]) : undefined;
 }
 function getTrackChangesFromArgs(rawArgs) {
+    // If flag not passed do not track changes
     let trackChanges = rawArgs.find(val => (val.startsWith(TRACK_CHANGES_FLAG) || val.startsWith(TRACK_CHANGES_SHORT_FLAG)));
+    if (trackChanges == undefined) {
+        return undefined;
+    }
+
+
+    // Check for argument passed (if any) 
     let trackChangesSplit = trackChanges?.split('=') ?? [];
-    if (2 <= trackChangesSplit.length && trackChangesSplit[1] == "hard") {
+    let arg = trackChangesSplit?.[1];
+    if (arg === HARD_RELOAD_ARG) {
         return TrackChanges.HARD;
     }
+    else if (arg === SOFT_RELOAD_ARG) {
+        return TrackChanges.SOFT;
+    }
+
 
     return TrackChanges.SOFT;
 }
+function getConcurrencyFromArgs(rawArgs) {
+    let concurrency = rawArgs.find(val => val.startsWith(CONCURRENCY_FLAG));
+    let concurrencyProvided = concurrency !== undefined;
+    return concurrencyProvided ? Number(concurrency.split('=')[1]) : undefined;
+}
 function listenForKey(reloadCallback, hardReloadCallback, exitCallback) {
-    if (process.stdin.isTTY) {
-        readline.emitKeypressEvents(process.stdin);
-        process.stdin.setRawMode(true);
-    }
-
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
     process.stdin.on("keypress", (chunk, key) => {
         if (key && key.shift && key.name == 'r') {
             hardReloadCallback();
@@ -139,47 +114,29 @@ export async function main() {
 
     // Assign input path
     let inputPath = getInputPathFromArgs(rawArgs);
-    if (inputPath == null) {
-        log(`Invalid input path "${inputPath}"`)
-        return;
-    }
 
 
     // Assign output path
     let outputPath = getOutputPathFromArgs(rawArgs);
-    if (outputPath == null) {
-        log(`Invalid output path "${outputPath}"`)
-        return;
-    }
-
-
-    // Check if output path is inside input path (causing infinite loop)
-    if (isPathInside(inputPath, outputPath)) {
-        log(`Output path "${outputPath}" cannot be inside or same as input path "${inputPath}"`);
-        return;
-    }
-
-
-    // Check if input path is inside output path (causing code wipeout)
-    if (isPathInside(outputPath, inputPath)) {
-        log(`Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`);
-        return;
-    }
 
 
     // Assign verbose
     let toBeVerbose = rawArgs.includes(VERBOSE_FLAG) || rawArgs.includes(VERBOSE_SHORT_FLAG);
 
 
+    // Assign concurrency
+    let concurrency = getConcurrencyFromArgs(rawArgs);
+
+
     // Assign to create only, Return if passed
     let toCreateOnly = rawArgs.includes(CREATE_FLAG) || rawArgs.includes(CREATE_SHORT_FLAG);
     if (toCreateOnly) {
         try {
-            emptyDir(outputPath)
-            await createSite(inputPath, outputPath, null, undefined, undefined, { toBeVerbose });
+            await createSite(inputPath, outputPath, null, undefined, { toBeVerbose });
         }
         catch (err) {
             process.exitCode = 1;  // Exit with error code if not created successfully
+            log(`${err}\n${err?.stack}`);
         }
 
         return;
@@ -187,15 +144,7 @@ export async function main() {
 
 
     // Assign port
-    let port = await getPortFromArgs(rawArgs);
-    if (port === -1) {
-        log(`Could not find any available ports, Try manually passing ${PORT_FLAG}=... flag`);
-        return;
-    }
-    else if (!Number.isInteger(port)) {
-        log(`Invalid port!`)
-        return;
-    }
+    let port = getPortFromArgs(rawArgs);
 
 
     // Assign tracking changes
@@ -203,15 +152,24 @@ export async function main() {
 
 
     // Start hosting
-    let hostMdx = new HostMdx(inputPath, outputPath, { port, trackChanges, toBeVerbose });
-    await hostMdx.start();
+    let configs = {
+        ...(port !== undefined && { port }),
+        ...(concurrency !== undefined && { concurrency }),
+        ...(trackChanges !== undefined && { trackChanges }),
+        ...(toBeVerbose && { toBeVerbose }),
+    }
+    let hostMdx = new HostMdx(inputPath, outputPath, configs);
+    let hasHostingStarted = await hostMdx.start();
+    if (!hasHostingStarted) {
+        return;
+    }
 
 
     // Assign cleanup function
     const cleanup = async () => {
         process.stdin.setRawMode(false);
         await hostMdx.stop();
-        process.exit(0);
+        process.exit(0);  // Without this 'Ctrl + c' does not work DO NOT REMOVE
     }
 
 
