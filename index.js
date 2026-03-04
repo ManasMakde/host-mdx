@@ -1,6 +1,7 @@
 import fs from "fs";
 import os from "os";
 import net from "net";
+import _ from 'lodash';
 import path from "path";
 import sirv from "sirv";
 import polka from "polka";
@@ -10,6 +11,7 @@ import chokidar from "chokidar";
 import { pathToFileURL } from "url";
 import { promises as fsp } from "fs";
 import { mdxToHtml } from "./mdx-to-html.js";
+import { DependencyGraph, crawlDir } from "./dependency-graph.js";
 
 
 // Enums
@@ -60,6 +62,17 @@ const LOG_TIME_OPTIONS = {
 const DEFAULT_CHOKIDAR_OPTIONS = {
     ignoreInitial: true
 };
+const DEFAULT_CONFIGS = {
+    port: 3000,
+    chokidarOptions: DEFAULT_CHOKIDAR_OPTIONS,
+    trackChanges: 0,
+    toBeVerbose: false,
+    concurrency: 1,
+    toExcludeDependency: (inputPath, outputpath, p) => {
+        const segments = p.split(path.sep);
+        return segments.includes('node_modules') || segments.includes('.git') || segments.includes('.github');
+    }
+};
 
 
 // Utility Methods
@@ -78,11 +91,6 @@ async function createFile(filePath, fileContent = "") {
     let fileLocation = path.dirname(filePath)
     await fsp.mkdir(fileLocation, { recursive: true });
     await fsp.writeFile(filePath, fileContent);
-}
-function crawlDir(dir) {
-    const absDir = path.resolve(dir);
-    let entries = fs.readdirSync(absDir, { recursive: true });
-    return entries.map(file => path.join(absDir, file));
 }
 async function startServer(hostDir, port, errorCallback) {  // Starts server at given port
 
@@ -174,10 +182,10 @@ export async function setupConfigs(inputPath) {
     let configFilePath = path.join(inputPath, CONFIG_FILE_NAME);
     if (fs.existsSync(configFilePath)) {
         let cleanConfigFilePath = pathToFileURL(configFilePath).href
-        return await import(cleanConfigFilePath);
+        return { ...DEFAULT_CONFIGS, ...(await import(cleanConfigFilePath)) };
     }
 
-    return {};
+    return _.cloneDeep(DEFAULT_CONFIGS);
 }
 export function createTempDir() {
     // Create default temp html dir
@@ -240,7 +248,7 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
     // Check if `inputPath` is inside `outputPath` (causing code wipeout)
     if (isPathInside(outputPath, inputPath)) {
-        throw `Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`;
+        throw new Error(`Input path "${inputPath}" cannot be inside or same as output path "${outputPath}"`);
     }
 
 
@@ -255,9 +263,10 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
 
     // Hard reload, clear output path & Get all paths from `inputPath`
-    if (pathsToCreate == null) {
+    let isHardReloading = pathsToCreate == null;
+    if (isHardReloading) {
         emptyDir(outputPath)
-        pathsToCreate = crawlDir(inputPath);
+        pathsToCreate = await crawlDir(inputPath);
     }
 
 
@@ -413,6 +422,7 @@ export class HostMdx {
     #app = null;
     #watcher = null;
     #ignores = null;
+    #depGraph = new DependencyGraph();
 
 
     // Constructors
@@ -426,28 +436,18 @@ export class HostMdx {
     // Private Methods
     async #watchForChanges(event, somePath) {
 
-        // Return if out input path itself if passed
-        if (this.inputPath === somePath) {
-            return;
+        // Update dependency graph
+        if (event === "unlink") {
+            this.#depGraph.removeEntry(somePath);
         }
-
-
-        // Return if matches .ignore file
-        const relToInput = path.relative(this.inputPath, somePath);
-        if (this.#ignores.ignores(relToInput)) {
-            return;
-        }
-
-
-        // Return if toIgnore() from configs
-        const toIgnore = await this.configs?.toIgnore?.(this.inputPath, this.outputPath, somePath);
-        if (toIgnore) {
-            return;
+        else {
+            this.#depGraph.addEntry(somePath);
         }
 
 
         // Add changed path
-        this.#alteredPaths.push(somePath);
+        let dependencies = this.#depGraph.getDeepDependents(somePath);
+        this.#alteredPaths = this.#alteredPaths.concat([...dependencies, somePath]);
 
 
         // Reflect changes immediately
@@ -472,7 +472,7 @@ export class HostMdx {
         await this.stop();
 
 
-        // Asssign all
+        // Assign all
         this.#inputPathProvided = this.inputPath !== "";
         this.#outputPathProvided = this.outputPath !== "";
         this.inputPath = this.#inputPathProvided ? this.inputPath : process.cwd();
@@ -516,6 +516,14 @@ export class HostMdx {
         await this.recreateSite(true);
 
 
+        // Create dependency graph 
+        let defaultMdxSettings = { esbuildOptions: () => ({}) };
+        let modMdxSettings = await this.configs?.modBundleMDXSettings?.(this.inputPath, this.outputPath, defaultMdxSettings);
+        let aliases = modMdxSettings?.esbuildOptions?.({})?.alias ?? {};
+        this.#depGraph.setAlias(aliases);
+        await this.#depGraph.createGraph(this.inputPath, async (p) => await this.configs?.toExcludeDependency?.(this.inputPath, this.outputPath, p));
+
+
         // Start server to host site
         this.#app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); throw e; });
         this.#app?.server?.on("close", async () => { await this.configs?.onHostEnded?.(this.inputPath, this.outputPath, port); });
@@ -556,8 +564,8 @@ export class HostMdx {
         // Actual site creation
         try {
             let pathsToCreate = hardReload ? null : [...this.#alteredPaths];
-            this.#alteredPaths = [];
             await createSite(this.inputPath, this.outputPath, pathsToCreate, this.#ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
+            this.#alteredPaths = [];
         }
         catch (err) {
             log(`Failed to create site!\n${err.stack}`);

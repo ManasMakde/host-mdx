@@ -148,7 +148,8 @@ export async function toIgnore(inputPath, outputPath, path) {
    return false;
 }
 export async function modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code){
-   // Modify code ...
+   // Wrapper example
+   code = `import Content from "${inFilePath}"; import { Wrapper } from "utils.jsx";\n\n<Wrapper><Content /></Wrapper>`
    return code;
 }
 export async function modGlobalArgs(inputPath, outputPath, globalArgs){
@@ -156,12 +157,29 @@ export async function modGlobalArgs(inputPath, outputPath, globalArgs){
    return globalArgs;
 }
 export async function modBundleMDXSettings(inputPath, outputPath, settings) {
-   // Modify settings ...
+   // Example for adding '@' root alias
+   var oldBuildOptions = settings.esbuildOptions;
+   settings.esbuildOptions = (options) => {
+      options = oldBuildOptions(options)
+      options.logLevel = 'error';
+      options.alias = {
+         ...options.alias,
+         '@': inputPath
+      };
+
+      return options;
+   }
+
+
    return settings;
 }
 export async function modRebuildPaths(inputPath, outputPath, rebuildPaths) {
    // Modify rebuildPaths ...
    return rebuildPaths;
+}
+export async function toExcludeDependency(inputPath, outputPath, path) {
+   const segments = path.split(/[\\/]/);
+   return segments.includes('node_modules') || segments.includes('.git') || segments.includes('.github');
 }
 export const chokidarOptions = {
    awaitWriteFinish: true

@@ -20,12 +20,14 @@
   "dependencies": {
     "chokidar": "^5.0.0",
     "ignore": "^7.0.5",
+    "lodash": "^4.17.23",
     "lowlight": "^3.3.0",
     "mdx-bundler": "^10.1.1",
     "p-limit": "^7.3.0",
     "polka": "^0.5.2",
     "preact": "^10.28.2",
     "preact-render-to-string": "^6.6.5",
+    "precinct": "^12.2.0",
     "rehype-highlight": "^7.0.2",
     "sirv": "^3.0.2"
   },
