@@ -124,10 +124,10 @@ export async function onHostStarted(inputPath, outputPath, port) {
 export async function onHostEnded(inputPath, outputPath, port) {
    console.log("onHostEnded");
 }
-export async function onSiteCreateStart(inputPath, outputPath) {
+export async function onSiteCreateStart(inputPath, outputPath, isSoftReload) {
    console.log("onSiteCreateStart");
 }
-export async function onSiteCreateEnd(inputPath, outputPath, wasInterrupted) {
+export async function onSiteCreateEnd(inputPath, outputPath, isSoftReload, wasInterrupted) {
    console.log("onSiteCreateEnd");
 }
 export async function onFileChangeStart(inputPath, outputPath, inFilePath, outFilePath, toBeDeleted) {

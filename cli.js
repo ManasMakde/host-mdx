@@ -177,7 +177,10 @@ export async function main() {
     // Watch for key press
     listenForKey(
         async () => await hostMdx?.recreateSite(),
-        async () => await hostMdx?.recreateSite(true),
+        async () => {
+            log("--- HARD RELOADING ---")
+            await hostMdx?.recreateSite(true)
+        },
         cleanup
     );
 

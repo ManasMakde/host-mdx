@@ -63,11 +63,12 @@ const DEFAULT_CHOKIDAR_OPTIONS = {
     ignoreInitial: true
 };
 const DEFAULT_CONFIGS = {
-    port: 3000,
+    // port: 3000,  // Intentionally kept commented out, otherwise interferes with auto port assigning DO NOT CHANGE
     chokidarOptions: DEFAULT_CHOKIDAR_OPTIONS,
     trackChanges: 0,
     toBeVerbose: false,
     concurrency: 1,
+    chokidarOptions: DEFAULT_CHOKIDAR_OPTIONS,
     canTriggerReload: (inputPath, outputpath, p) => {
         const ignoredDirs = new Set(['node_modules', '.git', '.github']);
         const segments = p.split(path.sep);
@@ -331,8 +332,8 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
 
     // Broadcast site creation started
-    log("Creating site...");
-    await configs?.onSiteCreateStart?.(inputPath, outputPath);
+    log(`Starting site creation at ${outputPath} ...`);
+    await configs?.onSiteCreateStart?.(inputPath, outputPath, !isHardReloading);
 
 
     // Iterate through all folders & files
@@ -408,8 +409,8 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
 
     // Broadcast site creation ended
-    log(wasInterrupted ? `Site creation was interrupted!` : `Created site at ${outputPath}`);
-    await configs?.onSiteCreateEnd?.(inputPath, outputPath, wasInterrupted);
+    log(wasInterrupted ? `Site creation was interrupted!` : `Completed site creation at ${outputPath}`);
+    await configs?.onSiteCreateEnd?.(inputPath, outputPath, !isHardReloading, wasInterrupted);
 }
 
 
