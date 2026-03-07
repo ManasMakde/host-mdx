@@ -72,7 +72,7 @@ export async function calcDependencies(filePath, aliases = {}) {
     // Return if given path has already been traversed or is a node_modules
     const absolutePath = path.resolve(filePath);
     if (absolutePath.includes('node_modules')) {
-        return [];
+        return new Set();
     }
 
 

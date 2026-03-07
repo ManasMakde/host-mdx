@@ -41,7 +41,7 @@ ${VERBOSE_FLAG}, ${VERBOSE_SHORT_FLAG}             Shows additional log messages
 function getInputPathFromArgs(rawArgs) {
     let inputPath = rawArgs.find(val => val.startsWith(INPUT_PATH_FLAG));
     let inputPathProvided = inputPath !== undefined;
-    inputPath = inputPathProvided ? inputPath.split('=')?.[1] : "";
+    inputPath = inputPathProvided ? inputPath.split('=')?.[1] : process.cwd();
     return inputPath !== "" ? path.resolve(inputPath) : inputPath;  // To ensure input path is absolute
 }
 function getOutputPathFromArgs(rawArgs) {

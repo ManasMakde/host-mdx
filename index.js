@@ -68,9 +68,10 @@ const DEFAULT_CONFIGS = {
     trackChanges: 0,
     toBeVerbose: false,
     concurrency: 1,
-    toExcludeDependency: (inputPath, outputpath, p) => {
+    canTriggerReload: (inputPath, outputpath, p) => {
+        const ignoredDirs = new Set(['node_modules', '.git', '.github']);
         const segments = p.split(path.sep);
-        return segments.includes('node_modules') || segments.includes('.git') || segments.includes('.github');
+        return !segments.some(segment => ignoredDirs.has(segment));
     }
 };
 
@@ -358,21 +359,23 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
         if (!pathExists) {
             let pathToDelete = isMdx ? absHtmlPath : absToOutput;
             log(`Deleting ${pathToDelete}`, !toBeVerbose);
+            await configs?.onFileChangeStart?.(inputPath, outputPath, pathToDelete, absToOutput, true);
             await fsp.rm(pathToDelete, { recursive: true, force: true });
+            await configs?.onFileChangeEnd?.(inputPath, outputPath, pathToDelete, absToOutput, true, undefined);
         }
         // Make corresponding directory
         else if (isDir) {
             log(`Creating ${currentPath} ---> ${absToOutput}`, !toBeVerbose);
-            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput);
+            await configs?.onFileChangeStart?.(inputPath, outputPath, currentPath, absToOutput, false);
             await fsp.mkdir(absToOutput, { recursive: true });
-            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined);
+            await configs?.onFileChangeEnd?.(inputPath, outputPath, currentPath, absToOutput, false, undefined);
         }
         // Make html file from mdx
         else if (isMdx) {
 
             // Broadcast file creation started
             log(`Creating ${currentPath} ---> ${absHtmlPath}`, !toBeVerbose);
-            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absHtmlPath);
+            await configs?.onFileChangeStart?.(inputPath, outputPath, currentPath, absHtmlPath, false);
 
 
             // Intercept mdx code
@@ -391,15 +394,15 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
 
             // Broadcast file creation ended
-            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absHtmlPath, result);
+            await configs?.onFileChangeEnd?.(inputPath, outputPath, currentPath, absHtmlPath, false, result);
         }
         // Copy paste file
         else {
-            log(`Creating ${currentPath} ---> ${absToOutput}`, !configs.toBeVerbose);
-            await configs?.onFileCreateStart?.(inputPath, outputPath, currentPath, absToOutput);
+            log(`Creating ${currentPath} ---> ${absToOutput}`, !toBeVerbose);
+            await configs?.onFileChangeStart?.(inputPath, outputPath, currentPath, absToOutput, false);
             await fsp.mkdir(path.dirname(absToOutput), { recursive: true });
             await fsp.copyFile(currentPath, absToOutput);
-            await configs?.onFileCreateEnd?.(inputPath, outputPath, currentPath, absToOutput, undefined);
+            await configs?.onFileChangeEnd?.(inputPath, outputPath, currentPath, absToOutput, false, undefined);
         }
     })));
 
@@ -509,7 +512,7 @@ export class HostMdx {
 
         // Watch for changes
         let chokidarOptions = { ...DEFAULT_CHOKIDAR_OPTIONS, ...(this.configs?.chokidarOptions ?? {}) };
-        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, path) => this.#watchForChanges(event, path));
+        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, targetPath) => this.#watchForChanges(event, targetPath));
 
 
         // Delete old files & Create site
@@ -521,7 +524,7 @@ export class HostMdx {
         let modMdxSettings = await this.configs?.modBundleMDXSettings?.(this.inputPath, this.outputPath, defaultMdxSettings);
         let aliases = modMdxSettings?.esbuildOptions?.({})?.alias ?? {};
         this.#depGraph.setAlias(aliases);
-        await this.#depGraph.createGraph(this.inputPath, async (p) => await this.configs?.toExcludeDependency?.(this.inputPath, this.outputPath, p));
+        await this.#depGraph.createGraph(this.inputPath, async (p) => !(await this.configs?.canTriggerReload?.(this.inputPath, this.outputPath, p)));
 
 
         // Start server to host site
@@ -552,7 +555,7 @@ export class HostMdx {
         if (this.#siteCreationStatus == SiteCreationStatus.ONGOING) {
             log("Site creation already ongoing! Added to pending")
             this.#siteCreationStatus = SiteCreationStatus.PENDING_RECREATION;
-            this.#pendingHardSiteCreation = hardReload;
+            this.#pendingHardSiteCreation = this.#pendingHardSiteCreation || hardReload;
             return;
         }
 

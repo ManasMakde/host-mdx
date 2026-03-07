@@ -1,4 +1,4 @@
-# host-mdx
+# 🌐 host-mdx
 
 [![Version](https://img.shields.io/npm/v/host-mdx.svg)](https://www.npmjs.com/package/host-mdx)\
 A cli tool to create and serve a static html website from a given mdx directory
@@ -50,15 +50,15 @@ hostMdx.start();
 
 ### Additional:
 
-You can add a file by the name `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
+You can add `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
 (similar to [.gitignore](https://git-scm.com/docs/gitignore))
 
-You can also add a file by the name `host-mdx.js` at the root of your input folder as a config file (Look at the example below for all available options)
+You can also add `host-mdx.js` at the root of your project as an optional config file for more complex behaviour (Look at the example below for all available options)
 
 
 > **Note:**  
 > 1. Any config properties passed from npx or import e.g. `port`, `toBeVerbose`, `trackChanges`, etc will override `host-mdx.js` export values
-> 1. Any changes made to `host-mdx.js` or any new package added requires complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
+> 1. Any changes made to `host-mdx.js` or any new packages added require complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
 
 <br/>
 
@@ -82,9 +82,9 @@ Input Directory:
 
 ```
 my-website-template/
+├─ .hostmdxignore
 ├─ 404.mdx
 ├─ index.mdx
-├─ .hostmdxignore
 ├─ host-mdx.js
 ├─ about/
 │  ├─ index.mdx
@@ -130,17 +130,17 @@ export async function onSiteCreateStart(inputPath, outputPath) {
 export async function onSiteCreateEnd(inputPath, outputPath, wasInterrupted) {
    console.log("onSiteCreateEnd");
 }
-export async function onFileCreateStart(inputFilePath, outputFilePath, inFilePath, outFilePath) {
-   console.log("onFileCreateStart");
+export async function onFileChangeStart(inputPath, outputPath, inFilePath, outFilePath, toBeDeleted) {
+   console.log("onFileChangeStart");
 }
-export async function onFileCreateEnd(inputFilePath, outputFilePath, inFilePath, outFilePath, result) {
+export async function onFileChangeEnd(inputPath, outputPath, inFilePath, outFilePath, wasDeleted, result) {
    // `result = undefined` if file is not .mdx
    // `result.html` contains stringified HTML
    // `result.exports` contains exports from mdx
-   console.log("onFileCreateEnd");
+   console.log("onFileChangeEnd");
 }
-export async function toIgnore(inputPath, outputPath, path) {
-   const isGOutputStream = /\.goutputstream-\w+$/.test(path);
+export async function toIgnore(inputPath, outputPath, targetPath) {
+   const isGOutputStream = /\.goutputstream-\w+$/.test(targetPath);
    if (isGOutputStream) {
       return true;
    }
@@ -177,9 +177,10 @@ export async function modRebuildPaths(inputPath, outputPath, rebuildPaths) {
    // Modify rebuildPaths ...
    return rebuildPaths;
 }
-export async function toExcludeDependency(inputPath, outputPath, path) {
-   const segments = path.split(/[\\/]/);
-   return segments.includes('node_modules') || segments.includes('.git') || segments.includes('.github');
+export async function canTriggerReload(inputPath, outputPath, targetPath) {
+   const ignoredDirs = new Set(['node_modules', '.git', '.github']);
+   const segments = targetPath.split(/[\\/]/);  // or targetPath.split(path.sep);
+   return !segments.some(segment => ignoredDirs.has(segment));
 }
 export const chokidarOptions = {
    awaitWriteFinish: true
