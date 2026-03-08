@@ -53,10 +53,11 @@ hostMdx.start();
 You can add `.hostmdxignore` at the root of your project to filter out which files/folders to skip while generating html
 (similar to [.gitignore](https://git-scm.com/docs/gitignore))
 
+> You can add `# [EXCLUDE]` comment on top of every path for behaviour similar to returning null in `toIgnore`
+
 You can also add `host-mdx.js` at the root of your project as an optional config file for more complex behaviour (Look at the example below for all available options)
 
 
-> **Note:**  
 > 1. Any config properties passed from npx or import e.g. `port`, `toBeVerbose`, `trackChanges`, etc will override `host-mdx.js` export values
 > 1. Any changes made to `host-mdx.js` or any new packages added require complete restart otherwise changes will not reflect due to [this bug](https://github.com/nodejs/node/issues/49442)
 
@@ -107,9 +108,11 @@ my-website-template/
 
 ```sh
 *.jsx
-blog/page2/
+# [EXCLUDE]
 static/temp.jpg
 !static/sample.jsx
+# [EXCLUDE]
+blog/page2/
 ```
 
 `host-mdx.js` file content:
@@ -140,11 +143,21 @@ export async function onFileChangeEnd(inputPath, outputPath, inFilePath, outFile
    console.log("onFileChangeEnd");
 }
 export async function toIgnore(inputPath, outputPath, targetPath) {
+   
+   // Return true = file not generated in output folder, 
+   // Return null = same as true but also prevents triggering reload
+   
    const isGOutputStream = /\.goutputstream-\w+$/.test(targetPath);
    if (isGOutputStream) {
-      return true;
+      return null; 
    }
-   
+
+   const ignoredDirs = new Set(['node_modules', '.git', '.github']);
+   const segments = targetPath.split(path.sep);
+   if (segments.some(segment => ignoredDirs.has(segment))) {
+      return null;
+   }
+
    return false;
 }
 export async function modMDXCode(inputPath, outputPath, inFilePath, outFilePath, code){
@@ -176,11 +189,6 @@ export async function modBundleMDXSettings(inputPath, outputPath, settings) {
 export async function modRebuildPaths(inputPath, outputPath, rebuildPaths) {
    // Modify rebuildPaths ...
    return rebuildPaths;
-}
-export async function canTriggerReload(inputPath, outputPath, targetPath) {
-   const ignoredDirs = new Set(['node_modules', '.git', '.github']);
-   const segments = targetPath.split(/[\\/]/);  // or targetPath.split(path.sep);
-   return !segments.some(segment => ignoredDirs.has(segment));
 }
 export const chokidarOptions = {
    awaitWriteFinish: true

@@ -79,7 +79,8 @@ function getTrackChangesFromArgs(rawArgs) {
 function getConcurrencyFromArgs(rawArgs) {
     let concurrency = rawArgs.find(val => val.startsWith(CONCURRENCY_FLAG));
     let concurrencyProvided = concurrency !== undefined;
-    return concurrencyProvided ? Number(concurrency.split('=')[1]) : undefined;
+    const val = concurrencyProvided ? Number(concurrency.split('=')[1]) : undefined;
+    return Number.isInteger(val) && val >= 1 ? val : undefined;
 }
 function listenForKey(reloadCallback, hardReloadCallback, exitCallback) {
     readline.emitKeypressEvents(process.stdin);

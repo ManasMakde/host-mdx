@@ -20,10 +20,10 @@ export async function crawlDir(dir, ignoreCheck = async (p) => false) {
     // Iterate through all files in dir
     let results = [];
     const list = fs.readdirSync(dir);
-    for (let somePath of list) {
+    for (let targetPath of list) {
 
         // get absolute path
-        const absPath = path.join(dir, somePath);
+        const absPath = path.join(dir, targetPath);
 
 
         // Skip if to ignore
@@ -46,21 +46,21 @@ export async function crawlDir(dir, ignoreCheck = async (p) => false) {
 
     return results;
 }
-export function resolveAlias(somePath, aliases) {
+export function resolveAlias(targetPath, aliases) {
     for (const [alias, aliasPath] of Object.entries(aliases)) {
 
         // Check if import is the alias or starts with alias + system separator
-        const isExact = somePath === alias;
-        const isSubPath = somePath.startsWith(`${alias}${path.sep}`) || somePath.startsWith(`${alias}/`);
+        const isExact = targetPath === alias;
+        const isSubPath = targetPath.startsWith(`${alias}${path.sep}`) || targetPath.startsWith(`${alias}/`);
 
         if (isExact || isSubPath) {
-            somePath = somePath.replace(alias, aliasPath);
-            somePath = path.normalize(somePath);
+            targetPath = targetPath.replace(alias, aliasPath);
+            targetPath = path.normalize(targetPath);
             break;
         }
     }
 
-    return somePath;
+    return targetPath;
 }
 export function ensureRelativePath(rootPath, filePath) {
     const absoluteTarget = path.resolve(rootPath, filePath);
@@ -129,7 +129,7 @@ export async function calcDependencies(filePath, aliases = {}) {
 }
 
 
-// classes
+// Classes
 export class DependencyGraph {
 
     // Private Properties
@@ -162,6 +162,10 @@ export class DependencyGraph {
 
         // Get relative path
         let relFilePath = ensureRelativePath(this.#rootFolder, filePath);
+
+
+        // Remove previous relations
+        this.removeEntry(filePath);
 
 
         // Get all dependencies
@@ -214,11 +218,14 @@ export class DependencyGraph {
         // Remove from dependents
         const depList = this.#graph[relFilePath][DEPENDENCIES_KEY];
         depList.forEach(dep => {
-            if (this.#graph[dep] === undefined) {
-                return;
-            }
+            this.#graph?.[dep]?.[DEPENDENTS_KEY]?.delete(relFilePath);
+        });
 
-            this.#graph[dep][DEPENDENTS_KEY].delete(relFilePath);
+
+        // Remove from dependencies
+        const depOf = this.#graph[relFilePath][DEPENDENTS_KEY];
+        depOf.forEach(dependent => {
+            this.#graph[dependent]?.[DEPENDENCIES_KEY]?.delete(relFilePath);
         });
 
 

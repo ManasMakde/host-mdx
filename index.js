@@ -35,15 +35,24 @@ const FILE_404 = "404.html";
 const NOT_FOUND_404_MESSAGE = "404";
 const DEFAULT_PORT = 3000;
 const MAX_PORT = 4000;
+const EXCLUDE_HEADER = "# [EXCLUDE]";  // Case insensitive
 const TEMP_HTML_DIR = path.join(os.tmpdir(), `${APP_NAME}`);
 const DEFAULT_IGNORES = `
+${EXCLUDE_HEADER}
 ${IGNORE_FILE_NAME}
+${EXCLUDE_HEADER}
 ${CONFIG_FILE_NAME}
+${EXCLUDE_HEADER}
 node_modules
+${EXCLUDE_HEADER}
 package-lock.json
+${EXCLUDE_HEADER}
 package.json
+${EXCLUDE_HEADER}
 .git
+${EXCLUDE_HEADER}
 .github
+${EXCLUDE_HEADER}
 .gitignore
 `;
 
@@ -64,15 +73,23 @@ const DEFAULT_CHOKIDAR_OPTIONS = {
 };
 const DEFAULT_CONFIGS = {
     // port: 3000,  // Intentionally kept commented out, otherwise interferes with auto port assigning DO NOT CHANGE
-    chokidarOptions: DEFAULT_CHOKIDAR_OPTIONS,
     trackChanges: 0,
     toBeVerbose: false,
     concurrency: 1,
     chokidarOptions: DEFAULT_CHOKIDAR_OPTIONS,
-    canTriggerReload: (inputPath, outputpath, p) => {
+    toIgnore: (inputPath, outputPath, targetPath) => {
+        const isGOutputStream = /\.goutputstream-\w+$/.test(targetPath);
+        if (isGOutputStream) {
+            return null;
+        }
+
         const ignoredDirs = new Set(['node_modules', '.git', '.github']);
-        const segments = p.split(path.sep);
-        return !segments.some(segment => ignoredDirs.has(segment));
+        const segments = targetPath.split(path.sep);
+        if (segments.some(segment => ignoredDirs.has(segment))) {
+            return null;
+        }
+
+        return false;
     }
 };
 
@@ -84,9 +101,48 @@ function getIgnore(ignoreFilePath) {
     if (fs.existsSync(ignoreFilePath)) {
         ignoreContent += `\n${fs.readFileSync(ignoreFilePath, "utf8")}`;
     }
-
     ig.add(ignoreContent);
+    return ig;
+}
+function getExclude(ignoreFilePath) {
 
+    // Read .ignore file
+    const ig = ignore();
+    let rawContent = DEFAULT_IGNORES;
+    if (fs.existsSync(ignoreFilePath)) {
+        rawContent += "\n" + fs.readFileSync(ignoreFilePath, "utf8");
+    }
+
+
+    // Only get lines which have "# [EXCLUDE]" comment on top
+    let filteredLines = [];
+    let hasExclude = false;
+    const lines = rawContent.split(/\r?\n/);
+    const excludeComment = EXCLUDE_HEADER.toLowerCase();
+    for (const line of lines) {
+        const trimmed = line.trim();
+
+        // Check for the header tag
+        if (trimmed.toLowerCase() === excludeComment) {
+            hasExclude = true;
+            continue;
+        }
+
+        // Reset if empty line found 
+        if (trimmed === "") {
+            hasExclude = false;
+            continue;
+        }
+
+        // Add line if has exclude otherwise continue
+        if (hasExclude) {
+            filteredLines.push(trimmed);
+        }
+    }
+
+
+    // Add to ignore
+    ig.add(filteredLines.join("\n"));
     return ig;
 }
 async function createFile(filePath, fileContent = "") {
@@ -103,10 +159,10 @@ async function startServer(hostDir, port, errorCallback) {  // Starts server at 
     // Start Server
     const assets = sirv(hostDir, { dev: true });
     const newApp = polka({
-        onNoMatch: (req, res) => {  // Send 404 file if found else not found message
-            const errorFile = path.join(hostDir, FILE_404);
-            if (fs.existsSync(errorFile)) {
-                const content = fs.readFileSync(errorFile);
+        onNoMatch: async (req, res) => {  // Send 404 file if found else not found message
+            const file404 = path.join(hostDir, FILE_404);
+            if (fs.existsSync(file404)) {
+                const content = await fsp.readFile(file404);
                 res.writeHead(404, {
                     'Content-Type': 'text/html',
                     'Content-Length': content.length
@@ -149,6 +205,18 @@ async function isPortAvailable(port) {
 
         server.listen(port);
     });
+}
+async function getAvailablePort(startPort = DEFAULT_PORT, maxPort = MAX_PORT) {
+    let currentPort = startPort;
+    while (currentPort <= maxPort) {
+        if (await isPortAvailable(currentPort)) {
+            return currentPort;
+        }
+
+        currentPort++;
+    }
+
+    return -1;
 }
 export function log(msg, toSkip = false) {
     if (toSkip) {  // Useful for verbose check
@@ -201,24 +269,12 @@ export function createTempDir() {
 
     return fs.mkdtempSync(path.join(TEMP_HTML_DIR, `html-${timestamp}-`));
 }
-export function emptyDir(dirPath) {
-    const files = fs.readdirSync(dirPath);
+export async function emptyDir(dirPath) {
+    const files = await fsp.readdir(dirPath);
     for (const file of files) {
         const fullPath = path.join(dirPath, file);
-        fs.rmSync(fullPath, { recursive: true, force: true });
+        await fsp.rm(fullPath, { recursive: true, force: true });
     }
-}
-export async function getAvailablePort(startPort = DEFAULT_PORT, maxPort = MAX_PORT) {
-    let currentPort = startPort;
-    while (currentPort <= maxPort) {
-        if (await isPortAvailable(currentPort)) {
-            return currentPort;
-        }
-
-        currentPort++;
-    }
-
-    return -1;
 }
 export async function createSite(inputPath = "", outputPath = "", pathsToCreate = [], ignores = undefined, configs = undefined, interruptCondition = undefined) {
 
@@ -267,7 +323,7 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
     // Hard reload, clear output path & Get all paths from `inputPath`
     let isHardReloading = pathsToCreate == null;
     if (isHardReloading) {
-        emptyDir(outputPath)
+        await emptyDir(outputPath)
         pathsToCreate = await crawlDir(inputPath);
     }
 
@@ -310,8 +366,8 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
 
 
         // Filter based on toIgnore() in configs
-        const toIgnore = await configs?.toIgnore?.(inputPath, outputPath, currentPath);
-        if (toIgnore) {
+        const toBeIgnored = await configs?.toIgnore?.(inputPath, outputPath, currentPath);
+        if (toBeIgnored === true || toBeIgnored === null) {
             return false;
         }
 
@@ -336,7 +392,7 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
     await configs?.onSiteCreateStart?.(inputPath, outputPath, !isHardReloading);
 
 
-    // Iterate through all folders & files
+    // Iterate & build all files
     let wasInterrupted = false;
     await Promise.all(pathsToCreate.map((currentPath) => limit(async () => {
 
@@ -360,9 +416,9 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
         if (!pathExists) {
             let pathToDelete = isMdx ? absHtmlPath : absToOutput;
             log(`Deleting ${pathToDelete}`, !toBeVerbose);
-            await configs?.onFileChangeStart?.(inputPath, outputPath, pathToDelete, absToOutput, true);
+            await configs?.onFileChangeStart?.(inputPath, outputPath, currentPath, pathToDelete, true);
             await fsp.rm(pathToDelete, { recursive: true, force: true });
-            await configs?.onFileChangeEnd?.(inputPath, outputPath, pathToDelete, absToOutput, true, undefined);
+            await configs?.onFileChangeEnd?.(inputPath, outputPath, currentPath, pathToDelete, true, undefined);
         }
         // Make corresponding directory
         else if (isDir) {
@@ -426,6 +482,7 @@ export class HostMdx {
     #app = null;
     #watcher = null;
     #ignores = null;
+    #excludes = null;
     #depGraph = new DependencyGraph();
 
 
@@ -438,26 +495,41 @@ export class HostMdx {
 
 
     // Private Methods
-    async #watchForChanges(event, somePath) {
+    async #watchForChanges(event, targetPath) {
+
+        // Skip reload if `toIgnore` gives null
+        let ignoreStat = await this.configs?.toIgnore?.(this.inputPath, this.outputPath, targetPath);
+        if (ignoreStat === null) {
+            return;
+        }
+
+
+        // Skip reload if has # [EXCLUDE] header in .ignore file
+        let relTargetPath = path.relative(this.inputPath, targetPath);
+        let excludeStat = this.#excludes?.ignores(relTargetPath);
+        if (excludeStat) {
+            return;
+        }
+
 
         // Update dependency graph
         if (event === "unlink") {
-            this.#depGraph.removeEntry(somePath);
+            this.#depGraph.removeEntry(targetPath);
         }
         else {
-            this.#depGraph.addEntry(somePath);
+            this.#depGraph.addEntry(targetPath);
         }
 
 
         // Add changed path
-        let dependencies = this.#depGraph.getDeepDependents(somePath);
-        this.#alteredPaths = this.#alteredPaths.concat([...dependencies, somePath]);
+        let dependencies = this.#depGraph.getDeepDependents(targetPath);
+        this.#alteredPaths = this.#alteredPaths.concat([...dependencies, targetPath]);
 
 
         // Reflect changes immediately
         if (this.configs?.trackChanges !== undefined && this.configs?.trackChanges != TrackChanges.NONE) {
             let toHardReload = this.configs?.trackChanges == TrackChanges.HARD;
-            log(`${toHardReload ? "Hard recreating" : "Recreating"} site, Event: ${event}, Path: ${somePath}`, !this.configs?.toBeVerbose);
+            log(`${toHardReload ? "Hard recreating" : "Recreating"} site, Event: ${event}, Path: ${targetPath}`, !this.configs?.toBeVerbose);
             await this.recreateSite(toHardReload);
         }
     }
@@ -507,13 +579,12 @@ export class HostMdx {
         this.#ignores = getIgnore(ignoreFilePath);
 
 
+        // Get excludes
+        this.#excludes = getExclude(ignoreFilePath);
+
+
         // Broadcast hosting about to start
         await this.configs?.onHostStarting?.(this.inputPath, this.outputPath, port);
-
-
-        // Watch for changes
-        let chokidarOptions = { ...DEFAULT_CHOKIDAR_OPTIONS, ...(this.configs?.chokidarOptions ?? {}) };
-        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, targetPath) => this.#watchForChanges(event, targetPath));
 
 
         // Delete old files & Create site
@@ -525,12 +596,17 @@ export class HostMdx {
         let modMdxSettings = await this.configs?.modBundleMDXSettings?.(this.inputPath, this.outputPath, defaultMdxSettings);
         let aliases = modMdxSettings?.esbuildOptions?.({})?.alias ?? {};
         this.#depGraph.setAlias(aliases);
-        await this.#depGraph.createGraph(this.inputPath, async (p) => !(await this.configs?.canTriggerReload?.(this.inputPath, this.outputPath, p)));
+        await this.#depGraph.createGraph(this.inputPath, async (targetPath) => (await this.configs?.toIgnore?.(this.inputPath, this.outputPath, targetPath)) === null || this.#excludes?.ignores(path.relative(this.inputPath, targetPath)));
 
 
         // Start server to host site
         this.#app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); throw e; });
         this.#app?.server?.on("close", async () => { await this.configs?.onHostEnded?.(this.inputPath, this.outputPath, port); });
+
+
+        // Watch for changes
+        let chokidarOptions = { ...DEFAULT_CHOKIDAR_OPTIONS, ...(this.configs?.chokidarOptions ?? {}) };
+        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, targetPath) => this.#watchForChanges(event, targetPath));
 
 
         // Broadcast hosting started
@@ -566,12 +642,13 @@ export class HostMdx {
 
 
         // Actual site creation
+        let pathsToCreate = hardReload ? null : [...new Set(this.#alteredPaths)];
         try {
-            let pathsToCreate = hardReload ? null : [...this.#alteredPaths];
-            await createSite(this.inputPath, this.outputPath, pathsToCreate, this.#ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
             this.#alteredPaths = [];
+            await createSite(this.inputPath, this.outputPath, pathsToCreate, this.#ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
         }
         catch (err) {
+            this.#alteredPaths = hardReload ? [] : [...pathsToCreate];  // Readd incase of failure
             log(`Failed to create site!\n${err.stack}`);
         }
 
@@ -580,13 +657,21 @@ export class HostMdx {
         const wasPending = this.#siteCreationStatus === SiteCreationStatus.PENDING_RECREATION;
         this.#siteCreationStatus = SiteCreationStatus.NONE;
         if (wasPending) {
-            await this.recreateSite(this.#pendingHardSiteCreation);
+            log("Recreating previously pending")
+            const wasHard = this.#pendingHardSiteCreation;
+            this.#pendingHardSiteCreation = false;
+            await this.recreateSite(wasHard);
         }
     }
     async abortSiteCreation() {
         this.#siteCreationStatus = SiteCreationStatus.NONE;
     }
     async stop() {
+
+        // Abort site creation if ongoing
+        await this.abortSiteCreation()
+
+
         // Remove temp dir html path
         if (!this.#outputPathProvided && fs.existsSync(this.outputPath)) {
             fs.rmSync(this.outputPath, { recursive: true });
