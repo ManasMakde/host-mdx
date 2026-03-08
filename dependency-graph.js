@@ -169,9 +169,15 @@ export class DependencyGraph {
 
 
         // Get all dependencies
-        const absFilePath = path.resolve(this.#rootFolder, relFilePath);
-        const dependencies = await calcDependencies(absFilePath, this.#aliases);
         const relDependencies = new Set();
+        const absFilePath = path.resolve(this.#rootFolder, relFilePath);
+        let dependencies;
+        try {
+            dependencies = await calcDependencies(absFilePath, this.#aliases);
+        }
+        catch (err) {
+            dependencies = new Set();
+        }
         dependencies.forEach(p => {
             relDependencies.add(path.relative(this.#rootFolder, p));
         })
@@ -331,7 +337,7 @@ export class DependencyGraph {
             });
         };
         walk(relFilePath);
-        
+
 
         return deepDependents;
     }
