@@ -69,9 +69,9 @@ export function ensureRelativePath(rootPath, filePath) {
 }
 export async function calcDependencies(filePath, aliases = {}) {
 
-    // Return if given path has already been traversed or is a node_modules
+    // Return if given path is in node_modules
     const absolutePath = path.resolve(filePath);
-    if (absolutePath.includes('node_modules')) {
+    if (absolutePath.split(path.sep).includes('node_modules')) {
         return new Set();
     }
 
@@ -115,7 +115,7 @@ export async function calcDependencies(filePath, aliases = {}) {
 
 
         // Skip if the resolved path is within node_modules
-        if (resolvedPath.includes('node_modules')) {
+        if (resolvedPath.split(path.sep).includes('node_modules')) {
             continue;
         }
 
@@ -164,8 +164,23 @@ export class DependencyGraph {
         let relFilePath = ensureRelativePath(this.#rootFolder, filePath);
 
 
-        // Remove previous relations
-        this.removeEntry(filePath);
+        // If did not exist previously create fresh
+        if (this.#graph?.[relFilePath] === undefined) {
+            this.#graph[relFilePath] = {
+                [DEPENDENCIES_KEY]: new Set(),
+                [DEPENDENTS_KEY]: new Set()
+            }
+        }
+
+
+        // Remove previous dependencies
+        const oldDeps = this.#graph[relFilePath][DEPENDENCIES_KEY];
+        oldDeps.forEach(dep => {
+            this.#graph?.[dep]?.[DEPENDENTS_KEY]?.delete(relFilePath);
+        });
+
+
+        // Intentionally not removing dependents since no way of knowing which files depend on `relFilePath` DO NOT CHANGE
 
 
         // Get all dependencies
@@ -180,30 +195,18 @@ export class DependencyGraph {
         }
         dependencies.forEach(p => {
             relDependencies.add(path.relative(this.#rootFolder, p));
-        })
-
-
-        // Skip if no dependencies
-        if (dependencies.size === 0) {
-            return;
-        }
+        });
 
 
         // Add dependencies
-        this.#graph[relFilePath] = {
-            [DEPENDENCIES_KEY]: relDependencies,
-            [DEPENDENTS_KEY]: new Set()
-        };
+        this.#graph[relFilePath][DEPENDENCIES_KEY] = relDependencies;
 
 
-        // Add dependents
+        // Add to dependents
         const depList = this.#graph[relFilePath][DEPENDENCIES_KEY];
         depList.forEach(dep => {
-            if (this.#graph[dep] === undefined) {
-                this.#graph[dep] = {
-                    [DEPENDENCIES_KEY]: new Set(),
-                    [DEPENDENTS_KEY]: new Set()
-                }
+            if (this.#graph?.[dep] === undefined) {
+                this.#graph[dep] = { [DEPENDENCIES_KEY]: new Set(), [DEPENDENTS_KEY]: new Set() };
             }
 
             this.#graph[dep][DEPENDENTS_KEY].add(relFilePath);
@@ -272,13 +275,8 @@ export class DependencyGraph {
         const deepDeps = new Set();
         const walk = (currentPath) => {
 
-            // Skip if not in graph
-            const deps = this.getDependencies(currentPath);
-            if (!deps) {
-                return;
-            }
-
             // Iterate over all dependencies
+            const deps = this.getDependencies(currentPath);
             deps.forEach(dep => {
                 if (deepDeps.has(dep)) {
                     return;
@@ -319,13 +317,8 @@ export class DependencyGraph {
         const deepDependents = new Set();
         const walk = (currentPath) => {
 
-            // Skip if not in graph
+            // Iterate over all dependents
             const dependents = this.getDependents(currentPath);
-            if (!dependents) {
-                return;
-            }
-
-            // Iterate over all dependencies
             dependents.forEach(dependent => {
                 if (deepDependents.has(dependent)) {
                     return;

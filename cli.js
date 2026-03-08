@@ -56,8 +56,14 @@ function getPortFromArgs(rawArgs) {
     return portProvided ? Number(port.split('=')[1]) : undefined;
 }
 function getTrackChangesFromArgs(rawArgs) {
+
     // If flag not passed do not track changes
-    let trackChanges = rawArgs.find(val => (val.startsWith(TRACK_CHANGES_FLAG) || val.startsWith(TRACK_CHANGES_SHORT_FLAG)));
+    let trackChanges = rawArgs.find(val =>
+        val === TRACK_CHANGES_SHORT_FLAG ||
+        val.startsWith(`${TRACK_CHANGES_SHORT_FLAG}=`) ||
+        val === TRACK_CHANGES_FLAG ||
+        val.startsWith(`${TRACK_CHANGES_FLAG}=`)
+    );
     if (trackChanges == undefined) {
         return undefined;
     }
@@ -177,19 +183,22 @@ export async function main() {
 
     // Watch for key press
     listenForKey(
-        async () => await hostMdx?.recreateSite(),
         async () => {
-            log("--- HARD RELOADING ---")
-            await hostMdx?.recreateSite(true)
+            log("--- RELOAD TRIGGERED ---");
+            await hostMdx?.recreateSite();
+        },
+        async () => {
+            log("--- HARD RELOAD TRIGGERED ---");
+            await hostMdx?.recreateSite(true);
         },
         cleanup
     );
 
 
     // Watch for quit
-    process.on("exit", cleanup);
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
+    process.on("exit", () => { process.stdin.setRawMode(false) });
 
 
     // Log key press instructions

@@ -600,13 +600,13 @@ export class HostMdx {
 
 
         // Start server to host site
-        this.#app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); throw e; });
+        this.#app = await startServer(this.outputPath, port, (e) => { log(`Failed to start server: ${e.message}`); });
         this.#app?.server?.on("close", async () => { await this.configs?.onHostEnded?.(this.inputPath, this.outputPath, port); });
 
 
         // Watch for changes
         let chokidarOptions = { ...DEFAULT_CHOKIDAR_OPTIONS, ...(this.configs?.chokidarOptions ?? {}) };
-        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", (event, targetPath) => this.#watchForChanges(event, targetPath));
+        this.#watcher = chokidar.watch(this.inputPath, chokidarOptions).on("all", async (event, targetPath) => { await this.#watchForChanges(event, targetPath) });
 
 
         // Broadcast hosting started
@@ -648,7 +648,7 @@ export class HostMdx {
             await createSite(this.inputPath, this.outputPath, pathsToCreate, this.#ignores, this.configs, () => this.#siteCreationStatus != SiteCreationStatus.ONGOING);
         }
         catch (err) {
-            this.#alteredPaths = hardReload ? [] : [...pathsToCreate];  // Readd incase of failure
+            this.#alteredPaths = hardReload ? this.#alteredPaths : [...new Set([...pathsToCreate, ...this.#alteredPaths])];  // Readd incase of failure
             log(`Failed to create site!\n${err.stack}`);
         }
 
@@ -665,6 +665,7 @@ export class HostMdx {
     }
     async abortSiteCreation() {
         this.#siteCreationStatus = SiteCreationStatus.NONE;
+        this.#pendingHardSiteCreation = false;
     }
     async stop() {
 
