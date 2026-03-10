@@ -1,7 +1,6 @@
 import fs from "fs";
 import os from "os";
 import net from "net";
-import _ from 'lodash';
 import path from "path";
 import sirv from "sirv";
 import polka from "polka";
@@ -248,14 +247,14 @@ export function isPathInside(parentPath, childPath) {
     );
 }
 export async function setupConfigs(inputPath) {
-
     let configFilePath = path.join(inputPath, CONFIG_FILE_NAME);
+    let configs = { ...DEFAULT_CONFIGS };
     if (fs.existsSync(configFilePath)) {
-        let cleanConfigFilePath = pathToFileURL(configFilePath).href
-        return { ...DEFAULT_CONFIGS, ...(await import(cleanConfigFilePath)) };
+        let cleanConfigFilePath = pathToFileURL(configFilePath).href;
+        configs = { ...configs, ...(await import(cleanConfigFilePath)) };
     }
 
-    return _.cloneDeep(DEFAULT_CONFIGS);
+    return configs;
 }
 export function createTempDir() {
     // Create default temp html dir
