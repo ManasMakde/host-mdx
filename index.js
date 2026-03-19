@@ -466,6 +466,12 @@ export async function createSite(inputPath = "", outputPath = "", pathsToCreate 
     // Broadcast site creation ended
     log(wasInterrupted ? `Site creation was interrupted!` : `Completed site creation at ${outputPath}`);
     await configs?.onSiteCreateEnd?.(inputPath, outputPath, !isHardReloading, wasInterrupted);
+
+
+    // Throw error on interruption, This was done to make sure `alteredPaths` retains old values
+    if (wasInterrupted) {
+        throw new Error(`Site creation interrupted!`);
+    }
 }
 
 
